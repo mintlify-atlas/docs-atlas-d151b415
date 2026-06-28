@@ -1,0 +1,97 @@
+---
+title: "TorchVision: PyTorch's Computer Vision Library"
+sidebarTitle: "Introduction"
+description: "TorchVision is PyTorch's official computer vision library, providing datasets, model architectures, transforms, and image/video I/O utilities."
+---
+
+TorchVision is PyTorch's official computer vision library, maintained by the PyTorch team and contributors since 2016. It bundles the most commonly needed building blocks for computer vision workflows — from loading raw images and videos to applying state-of-the-art pre-trained models — all deeply integrated with PyTorch's tensor ecosystem and autograd engine. Whether you are training a custom model from scratch, fine-tuning a pre-trained backbone, or running inference in production, TorchVision provides the primitives to get the job done without reinventing the wheel.
+
+## What's Inside TorchVision
+
+TorchVision is organized into six top-level modules, each covering a distinct concern in a typical computer vision pipeline.
+
+<CardGroup cols={2}>
+  <Card title="torchvision.models" icon="brain" href="/models/overview">
+    Pre-trained architectures for classification, detection, segmentation, optical flow, and video understanding. Weights are versioned via the `WeightsEnum` API introduced in v0.13.
+  </Card>
+  <Card title="torchvision.transforms" icon="wand-magic-sparkles" href="/transforms/overview">
+    Image and video augmentation pipelines. The modern `v2` API operates on PIL images, tensors, and the new `TVTensors` types (masks, bounding boxes, keypoints) in a single, composable pass.
+  </Card>
+  <Card title="torchvision.datasets" icon="database" href="/datasets/overview">
+    Ready-to-use `torch.utils.data.Dataset` implementations for dozens of popular benchmarks including ImageNet, COCO, VOC, CIFAR, and more.
+  </Card>
+  <Card title="torchvision.ops" icon="gear" href="/ops/overview">
+    Computer-vision–specific operators such as `nms`, `roi_align`, `deform_conv2d`, and `box_iou` that are not present in core PyTorch.
+  </Card>
+  <Card title="torchvision.io" icon="file-image" href="/io/image-video">
+    Low-level image and video reading and writing backed by native C++ codecs. Supports JPEG, PNG, WebP, and video via PyAV (FFmpeg bindings).
+  </Card>
+  <Card title="torchvision.utils" icon="toolbox" href="/utilities/visualization">
+    Visualization helpers such as `make_grid`, `draw_bounding_boxes`, `draw_segmentation_masks`, and `draw_keypoints` for inspecting model outputs.
+  </Card>
+</CardGroup>
+
+## Modern Transforms and TVTensors
+
+TorchVision v0.15 introduced a redesigned `torchvision.transforms.v2` API alongside a new type system called **TVTensors**. TVTensors are thin `torch.Tensor` subclasses — `Image`, `BoundingBoxes`, `Mask`, and `Video` — that carry semantic metadata so that a single transform pipeline can correctly handle every tensor type simultaneously. For example, a `RandomHorizontalFlip` applied to a `(image, BoundingBoxes, Mask)` tuple will flip all three in a geometrically consistent way.
+
+```python
+import torchvision.transforms.v2 as T
+from torchvision.tv_tensors import BoundingBoxes, Mask
+
+transform = T.Compose([
+    T.RandomHorizontalFlip(p=0.5),
+    T.RandomCrop(size=(224, 224)),
+    T.ToDtype(torch.float32, scale=True),
+    T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+])
+```
+
+<Note>
+  The `v2` transforms API is the recommended path for all new projects. The legacy `torchvision.transforms` (v1) namespace remains available for backwards compatibility but will not receive new features.
+</Note>
+
+## Version Compatibility
+
+TorchVision releases are tightly coupled to PyTorch releases. Always install matching versions using the official PyTorch installer at [pytorch.org/get-started/locally](https://pytorch.org/get-started/locally/). The table below shows recent stable pairings and their supported Python ranges.
+
+| `torch`            | `torchvision`      | Python             |
+| ------------------ | ------------------ | ------------------ |
+| `main` / `nightly` | `main` / `nightly` | `>=3.10`, `<=3.14` |
+| `2.12`             | `0.27`             | `>=3.10`, `<=3.14` |
+| `2.11`             | `0.26`             | `>=3.10`, `<=3.14` |
+| `2.10`             | `0.25`             | `>=3.10`, `<=3.14` |
+| `2.9`              | `0.24`             | `>=3.10`, `<=3.14` |
+| `2.8`              | `0.23`             | `>=3.9`, `<=3.13`  |
+| `2.7`              | `0.22`             | `>=3.9`, `<=3.13`  |
+| `2.6`              | `0.21`             | `>=3.9`, `<=3.12`  |
+
+<Warning>
+  Mismatched `torch` and `torchvision` versions are one of the most common sources of runtime errors. Always verify with `import torchvision; print(torchvision.__version__)` after installation.
+</Warning>
+
+## Image Backends
+
+TorchVision supports multiple image-loading backends, selectable at runtime via `torchvision.set_image_backend()`:
+
+- **PIL / Pillow** *(default)* — The reference backend. Supports the widest range of image formats and operations.
+- **Pillow-SIMD** — A drop-in replacement for Pillow that uses SIMD CPU instructions for significantly faster decoding. Swap in without any code changes.
+- **accimage** — Uses the Intel IPP library. Generally faster than Pillow for JPEG decoding but supports fewer operations and formats.
+
+```python
+import torchvision
+
+# Switch to accimage for faster JPEG loading (requires accimage to be installed)
+torchvision.set_image_backend("accimage")
+
+# Query the active backend at any time
+print(torchvision.get_image_backend())  # "accimage"
+```
+
+<Info>
+  For most workflows the default PIL backend is sufficient. Consider Pillow-SIMD or accimage only when image loading is a measured bottleneck in your training pipeline.
+</Info>
+
+## License
+
+TorchVision is released under the **BSD 3-Clause License**. Pre-trained model weights may carry additional terms derived from the datasets on which they were trained — for example, SWAG models are released under CC-BY-NC 4.0. Always verify the license of any specific weights before commercial use.

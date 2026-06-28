@@ -1,0 +1,453 @@
+---
+title: "Image Classification Models in TorchVision"
+sidebarTitle: "Classification"
+description: "Pretrained image classification models in torchvision.models, spanning CNNs, transformers, and efficient architectures trained on ImageNet."
+---
+
+`torchvision.models` provides a comprehensive collection of pretrained image classification architectures — from classic CNNs like AlexNet and VGG through residual networks, efficient mobile-friendly models, and modern vision transformers. Every model uses the **new weights API**: each builder function accepts a typed `weights` argument that bundles the pretrained parameters together with the preprocessing transforms that match how the model was originally trained. Passing `weights=None` constructs a randomly initialised model. All models default to `num_classes=1000` for ImageNet and output raw logits of shape `[batch_size, 1000]`.
+
+## Quick start
+
+```python
+from torchvision.models import (
+    resnet50, ResNet50_Weights,
+    efficientnet_b0, EfficientNet_B0_Weights,
+    vit_b_16, ViT_B_16_Weights,
+)
+
+# ResNet-50 with latest (V2) ImageNet weights
+model = resnet50(weights=ResNet50_Weights.IMAGENET1K_V2)
+
+# EfficientNet-B0
+model = efficientnet_b0(weights=EfficientNet_B0_Weights.IMAGENET1K_V1)
+
+# Vision Transformer B/16 with SWAG end-to-end fine-tuned weights
+model = vit_b_16(weights=ViT_B_16_Weights.IMAGENET1K_SWAG_E2E_V1)
+
+# Use DEFAULT to always get the best available weights
+model = resnet50(weights=ResNet50_Weights.DEFAULT)
+model.eval()
+
+# Retrieve the matching preprocessing pipeline
+preprocess = ResNet50_Weights.DEFAULT.transforms()
+```
+
+<Note>
+  All classification models output **logits** (unnormalised scores) of shape `[batch_size, num_classes]` where `num_classes=1000` by default for ImageNet. Apply `torch.nn.functional.softmax` to convert to probabilities, or `torch.argmax` to obtain the predicted class index.
+</Note>
+
+## Replacing the classification head
+
+To fine-tune on a custom number of classes you can either replace the head after loading pretrained weights, or pass `num_classes` directly at construction time (skips the pretrained head).
+
+```python
+import torch.nn as nn
+from torchvision.models import resnet50, ResNet50_Weights
+
+num_classes = 10
+
+# Option 1 — load pretrained backbone, then replace the head
+model = resnet50(weights=ResNet50_Weights.DEFAULT)
+model.fc = nn.Linear(model.fc.in_features, num_classes)  # ResNet uses model.fc
+
+# Option 2 — construct with custom num_classes (no pretrained head)
+from torchvision.models import efficientnet_b0
+model = efficientnet_b0(weights=None, num_classes=num_classes)
+
+# Vision Transformer head is nested under model.heads.head
+from torchvision.models import vit_b_16, ViT_B_16_Weights
+model = vit_b_16(weights=ViT_B_16_Weights.DEFAULT)
+model.heads.head = nn.Linear(model.heads.head.in_features, num_classes)
+
+# ConvNeXt / Swin use model.classifier[-1] or model.head
+from torchvision.models import convnext_tiny, swin_t
+model = convnext_tiny(weights=None)
+model.classifier[2] = nn.Linear(model.classifier[2].in_features, num_classes)
+```
+
+---
+
+## Model families
+
+### Classic CNNs
+
+Foundational architectures included for reproducibility and transfer-learning baselines.
+
+<CardGroup cols={2}>
+  <Card title="AlexNet" icon="microchip">
+    The 2012 ImageNet winner. Simple five-conv architecture with three fully-connected layers.
+  </Card>
+  <Card title="VGG" icon="layer-group">
+    Very deep networks (11–19 layers) with uniform 3×3 convolutions. Optional batch normalisation variants.
+  </Card>
+  <Card title="SqueezeNet" icon="compress">
+    Fire-module architecture achieving AlexNet-level accuracy at 50× fewer parameters.
+  </Card>
+  <Card title="GoogLeNet / Inception V3" icon="diagram-project">
+    Inception-module networks with auxiliary classifiers for regularisation during training.
+  </Card>
+</CardGroup>
+
+<CodeGroup>
+```python AlexNet
+from torchvision.models import alexnet, AlexNet_Weights
+
+model = alexnet(weights=AlexNet_Weights.IMAGENET1K_V1)
+```
+
+```python VGG
+from torchvision.models import (
+    vgg11, VGG11_Weights,
+    vgg11_bn, VGG11_BN_Weights,
+    vgg13, VGG13_Weights,
+    vgg13_bn, VGG13_BN_Weights,
+    vgg16, VGG16_Weights,
+    vgg16_bn, VGG16_BN_Weights,
+    vgg19, VGG19_Weights,
+    vgg19_bn, VGG19_BN_Weights,
+)
+
+model = vgg16(weights=VGG16_Weights.IMAGENET1K_V1)
+model_bn = vgg16_bn(weights=VGG16_BN_Weights.IMAGENET1K_V1)
+```
+
+```python SqueezeNet
+from torchvision.models import (
+    squeezenet1_0, SqueezeNet1_0_Weights,
+    squeezenet1_1, SqueezeNet1_1_Weights,
+)
+
+model = squeezenet1_1(weights=SqueezeNet1_1_Weights.IMAGENET1K_V1)
+```
+
+```python GoogLeNet / Inception
+from torchvision.models import (
+    googlenet, GoogLeNet_Weights,
+    inception_v3, Inception_V3_Weights,
+)
+
+model = googlenet(weights=GoogLeNet_Weights.IMAGENET1K_V1)
+model = inception_v3(weights=Inception_V3_Weights.IMAGENET1K_V1)
+```
+</CodeGroup>
+
+| Builder | Weights class | Available variants |
+|---|---|---|
+| `alexnet` | `AlexNet_Weights` | `IMAGENET1K_V1` |
+| `vgg11` / `vgg11_bn` | `VGG11_Weights` / `VGG11_BN_Weights` | `IMAGENET1K_V1` |
+| `vgg13` / `vgg13_bn` | `VGG13_Weights` / `VGG13_BN_Weights` | `IMAGENET1K_V1` |
+| `vgg16` / `vgg16_bn` | `VGG16_Weights` / `VGG16_BN_Weights` | `IMAGENET1K_V1` |
+| `vgg19` / `vgg19_bn` | `VGG19_Weights` / `VGG19_BN_Weights` | `IMAGENET1K_V1` |
+| `squeezenet1_0` | `SqueezeNet1_0_Weights` | `IMAGENET1K_V1` |
+| `squeezenet1_1` | `SqueezeNet1_1_Weights` | `IMAGENET1K_V1` |
+| `googlenet` | `GoogLeNet_Weights` | `IMAGENET1K_V1` |
+| `inception_v3` | `Inception_V3_Weights` | `IMAGENET1K_V1` |
+
+---
+
+### ResNet family
+
+Residual networks introduced skip connections to enable very deep networks. TorchVision ships the original ResNets, aggregated residual transformations (ResNeXt), and Wide ResNets.
+
+```python
+from torchvision.models import (
+    resnet18, ResNet18_Weights,
+    resnet34, ResNet34_Weights,
+    resnet50, ResNet50_Weights,
+    resnet101, ResNet101_Weights,
+    resnet152, ResNet152_Weights,
+    resnext50_32x4d, ResNeXt50_32X4D_Weights,
+    resnext101_32x8d, ResNeXt101_32X8D_Weights,
+    resnext101_64x4d, ResNeXt101_64X4D_Weights,
+    wide_resnet50_2, Wide_ResNet50_2_Weights,
+    wide_resnet101_2, Wide_ResNet101_2_Weights,
+)
+
+# V2 weights are higher accuracy and should be preferred
+model = resnet50(weights=ResNet50_Weights.IMAGENET1K_V2)
+
+# ResNeXt — grouped convolutions, competitive with ResNet-200
+model = resnext101_32x8d(weights=ResNeXt101_32X8D_Weights.IMAGENET1K_V2)
+
+# Wide ResNet — wider rather than deeper
+model = wide_resnet50_2(weights=Wide_ResNet50_2_Weights.IMAGENET1K_V2)
+```
+
+The classification head is `model.fc` — an `nn.Linear(in_features, 1000)` layer.
+
+| Builder | Weights class | Best weights |
+|---|---|---|
+| `resnet18` | `ResNet18_Weights` | `IMAGENET1K_V1` |
+| `resnet34` | `ResNet34_Weights` | `IMAGENET1K_V1` |
+| `resnet50` | `ResNet50_Weights` | `IMAGENET1K_V2` |
+| `resnet101` | `ResNet101_Weights` | `IMAGENET1K_V2` |
+| `resnet152` | `ResNet152_Weights` | `IMAGENET1K_V2` |
+| `resnext50_32x4d` | `ResNeXt50_32X4D_Weights` | `IMAGENET1K_V2` |
+| `resnext101_32x8d` | `ResNeXt101_32X8D_Weights` | `IMAGENET1K_V2` |
+| `resnext101_64x4d` | `ResNeXt101_64X4D_Weights` | `IMAGENET1K_V1` |
+| `wide_resnet50_2` | `Wide_ResNet50_2_Weights` | `IMAGENET1K_V2` |
+| `wide_resnet101_2` | `Wide_ResNet101_2_Weights` | `IMAGENET1K_V2` |
+
+---
+
+### Efficient CNNs
+
+Mobile-first and efficiency-focused architectures that balance accuracy against parameter count and latency.
+
+#### MobileNet
+
+<CodeGroup>
+```python MobileNetV2
+from torchvision.models import mobilenet_v2, MobileNet_V2_Weights
+
+model = mobilenet_v2(weights=MobileNet_V2_Weights.IMAGENET1K_V1)
+```
+
+```python MobileNetV3
+from torchvision.models import (
+    mobilenet_v3_large, MobileNet_V3_Large_Weights,
+    mobilenet_v3_small, MobileNet_V3_Small_Weights,
+)
+
+model = mobilenet_v3_large(weights=MobileNet_V3_Large_Weights.IMAGENET1K_V2)
+model = mobilenet_v3_small(weights=MobileNet_V3_Small_Weights.IMAGENET1K_V1)
+```
+</CodeGroup>
+
+#### EfficientNet
+
+Compound scaling across depth, width, and resolution. B0–B7 scale up from the base model; V2 uses fused MBConv layers in early stages.
+
+```python
+from torchvision.models import (
+    efficientnet_b0, EfficientNet_B0_Weights,
+    efficientnet_b1, EfficientNet_B1_Weights,
+    efficientnet_b2, EfficientNet_B2_Weights,
+    efficientnet_b3, EfficientNet_B3_Weights,
+    efficientnet_b4, EfficientNet_B4_Weights,
+    efficientnet_b5, EfficientNet_B5_Weights,
+    efficientnet_b6, EfficientNet_B6_Weights,
+    efficientnet_b7, EfficientNet_B7_Weights,
+    efficientnet_v2_s, EfficientNet_V2_S_Weights,
+    efficientnet_v2_m, EfficientNet_V2_M_Weights,
+    efficientnet_v2_l, EfficientNet_V2_L_Weights,
+)
+
+model = efficientnet_b0(weights=EfficientNet_B0_Weights.IMAGENET1K_V1)
+model = efficientnet_v2_s(weights=EfficientNet_V2_S_Weights.IMAGENET1K_V1)
+```
+
+The EfficientNet head is `model.classifier` — an `nn.Sequential` ending with `nn.Linear(in_features, num_classes)`.
+
+#### MNASNet
+
+```python
+from torchvision.models import (
+    mnasnet0_5, MNASNet0_5_Weights,
+    mnasnet0_75, MNASNet0_75_Weights,
+    mnasnet1_0, MNASNet1_0_Weights,
+    mnasnet1_3, MNASNet1_3_Weights,
+)
+
+model = mnasnet1_0(weights=MNASNet1_0_Weights.IMAGENET1K_V1)
+```
+
+#### ShuffleNetV2
+
+```python
+from torchvision.models import (
+    shufflenet_v2_x0_5, ShuffleNet_V2_X0_5_Weights,
+    shufflenet_v2_x1_0, ShuffleNet_V2_X1_0_Weights,
+    shufflenet_v2_x1_5, ShuffleNet_V2_X1_5_Weights,
+    shufflenet_v2_x2_0, ShuffleNet_V2_X2_0_Weights,
+)
+
+model = shufflenet_v2_x1_0(weights=ShuffleNet_V2_X1_0_Weights.IMAGENET1K_V1)
+```
+
+#### RegNet
+
+RegNets follow a regularised design space with X (cross-stage) and Y (with SE blocks) series. Sizes are labelled by approximate FLOP count.
+
+```python
+from torchvision.models import (
+    # RegNet-Y series (with Squeeze-and-Excitation)
+    regnet_y_400mf, RegNet_Y_400MF_Weights,
+    regnet_y_800mf, RegNet_Y_800MF_Weights,
+    regnet_y_1_6gf, RegNet_Y_1_6GF_Weights,
+    regnet_y_3_2gf, RegNet_Y_3_2GF_Weights,
+    regnet_y_8gf,   RegNet_Y_8GF_Weights,
+    regnet_y_16gf,  RegNet_Y_16GF_Weights,
+    regnet_y_32gf,  RegNet_Y_32GF_Weights,
+    regnet_y_128gf, RegNet_Y_128GF_Weights,
+    # RegNet-X series
+    regnet_x_400mf, RegNet_X_400MF_Weights,
+    regnet_x_800mf, RegNet_X_800MF_Weights,
+    regnet_x_1_6gf, RegNet_X_1_6GF_Weights,
+    regnet_x_3_2gf, RegNet_X_3_2GF_Weights,
+    regnet_x_8gf,   RegNet_X_8GF_Weights,
+    regnet_x_16gf,  RegNet_X_16GF_Weights,
+    regnet_x_32gf,  RegNet_X_32GF_Weights,
+)
+
+model = regnet_y_8gf(weights=RegNet_Y_8GF_Weights.IMAGENET1K_V2)
+```
+
+<Tip>
+  Several large RegNet-Y models (`regnet_y_16gf`, `regnet_y_32gf`, `regnet_y_128gf`) have additional `IMAGENET1K_SWAG_E2E_V1` and `IMAGENET1K_SWAG_LINEAR_V1` weights from self-supervised pre-training with SWAG, yielding significantly higher top-1 accuracy.
+</Tip>
+
+---
+
+### Vision Transformers
+
+Attention-based architectures that process images as sequences of non-overlapping patches.
+
+#### ViT (Vision Transformer)
+
+```python
+from torchvision.models import (
+    vit_b_16, ViT_B_16_Weights,
+    vit_b_32, ViT_B_32_Weights,
+    vit_l_16, ViT_L_16_Weights,
+    vit_l_32, ViT_L_32_Weights,
+    vit_h_14, ViT_H_14_Weights,
+)
+
+# Standard supervised weights
+model = vit_b_16(weights=ViT_B_16_Weights.IMAGENET1K_V1)
+
+# SWAG end-to-end fine-tuned — higher accuracy, 518×518 input
+model = vit_b_16(weights=ViT_B_16_Weights.IMAGENET1K_SWAG_E2E_V1)
+
+# SWAG linear probe — frozen backbone, lower latency
+model = vit_l_16(weights=ViT_L_16_Weights.IMAGENET1K_SWAG_LINEAR_V1)
+
+# ViT-H/14 — largest variant, SWAG weights only
+model = vit_h_14(weights=ViT_H_14_Weights.IMAGENET1K_SWAG_E2E_V1)
+```
+
+The ViT head is `model.heads.head` — an `nn.Linear(hidden_dim, num_classes)`.
+
+| Builder | Patch size | Hidden dim | Weights classes |
+|---|---|---|---|
+| `vit_b_16` | 16×16 | 768 | `ViT_B_16_Weights` |
+| `vit_b_32` | 32×32 | 768 | `ViT_B_32_Weights` |
+| `vit_l_16` | 16×16 | 1024 | `ViT_L_16_Weights` |
+| `vit_l_32` | 32×32 | 1024 | `ViT_L_32_Weights` |
+| `vit_h_14` | 14×14 | 1280 | `ViT_H_14_Weights` |
+
+#### Swin Transformer
+
+Hierarchical transformers with shifted-window self-attention. V2 adds log-spaced continuous relative position biases for improved transfer to higher resolutions.
+
+```python
+from torchvision.models import (
+    swin_t, Swin_T_Weights,
+    swin_s, Swin_S_Weights,
+    swin_b, Swin_B_Weights,
+    swin_v2_t, Swin_V2_T_Weights,
+    swin_v2_s, Swin_V2_S_Weights,
+    swin_v2_b, Swin_V2_B_Weights,
+)
+
+model = swin_t(weights=Swin_T_Weights.IMAGENET1K_V1)
+model = swin_v2_b(weights=Swin_V2_B_Weights.IMAGENET1K_V1)
+```
+
+The Swin head is `model.head` — an `nn.Linear(num_features, num_classes)`.
+
+| Builder | Size | Weights class |
+|---|---|---|
+| `swin_t` | Tiny | `Swin_T_Weights` |
+| `swin_s` | Small | `Swin_S_Weights` |
+| `swin_b` | Base | `Swin_B_Weights` |
+| `swin_v2_t` | V2 Tiny | `Swin_V2_T_Weights` |
+| `swin_v2_s` | V2 Small | `Swin_V2_S_Weights` |
+| `swin_v2_b` | V2 Base | `Swin_V2_B_Weights` |
+
+#### MaxViT
+
+Multi-axis vision transformer that combines local window attention with global grid attention within each block.
+
+```python
+from torchvision.models import maxvit_t, MaxVit_T_Weights
+
+model = maxvit_t(weights=MaxVit_T_Weights.IMAGENET1K_V1)
+```
+
+#### ConvNeXt
+
+Pure convolutional architecture inspired by transformer design choices (large kernels, LayerNorm, GELU), matching Swin Transformer accuracy with a standard ConvNet training recipe.
+
+```python
+from torchvision.models import (
+    convnext_tiny,  ConvNeXt_Tiny_Weights,
+    convnext_small, ConvNeXt_Small_Weights,
+    convnext_base,  ConvNeXt_Base_Weights,
+    convnext_large, ConvNeXt_Large_Weights,
+)
+
+model = convnext_tiny(weights=ConvNeXt_Tiny_Weights.IMAGENET1K_V1)
+model = convnext_base(weights=ConvNeXt_Base_Weights.IMAGENET1K_V1)
+```
+
+The ConvNeXt head is `model.classifier[2]` — an `nn.Linear(in_features, num_classes)` at index 2 of the classifier `nn.Sequential`.
+
+---
+
+### DenseNet
+
+Dense connections — every layer receives feature maps from all previous layers in the same block — maximise feature reuse and reduce the number of parameters.
+
+```python
+from torchvision.models import (
+    densenet121, DenseNet121_Weights,
+    densenet161, DenseNet161_Weights,
+    densenet169, DenseNet169_Weights,
+    densenet201, DenseNet201_Weights,
+)
+
+model = densenet121(weights=DenseNet121_Weights.IMAGENET1K_V1)
+model = densenet201(weights=DenseNet201_Weights.IMAGENET1K_V1)
+```
+
+| Builder | Growth rate | Params (M) | Weights class |
+|---|---|---|---|
+| `densenet121` | 32 | 8.0 | `DenseNet121_Weights` |
+| `densenet161` | 48 | 28.7 | `DenseNet161_Weights` |
+| `densenet169` | 32 | 14.1 | `DenseNet169_Weights` |
+| `densenet201` | 32 | 20.0 | `DenseNet201_Weights` |
+
+---
+
+## Running inference end-to-end
+
+The weights object carries the matching preprocessing transforms so the input pipeline is always consistent with training.
+
+```python
+import torch
+from PIL import Image
+from torchvision.models import resnet50, ResNet50_Weights
+
+weights = ResNet50_Weights.DEFAULT          # alias for the best available weights
+model   = resnet50(weights=weights)
+model.eval()
+
+# weights.transforms() returns a torchvision transform pipeline
+preprocess = weights.transforms()
+
+img = Image.open("cat.jpg").convert("RGB")
+batch = preprocess(img).unsqueeze(0)        # [1, 3, 224, 224]
+
+with torch.inference_mode():
+    logits = model(batch)                   # [1, 1000]
+
+class_id   = logits.argmax(dim=1).item()
+class_name = weights.meta["categories"][class_id]
+print(class_name)
+```
+
+<Warning>
+  Always call `model.eval()` before inference. Batch Normalization and Dropout behave differently in training mode and will produce incorrect predictions if left in training mode.
+</Warning>

@@ -1,0 +1,253 @@
+---
+title: "TorchVision Models: Pre-trained Architectures Overview"
+sidebarTitle: "Overview"
+description: "Explore TorchVision's pre-trained model zoo: classification, detection, segmentation, video, and optical flow with a unified weights= API."
+---
+
+TorchVision ships a comprehensive model zoo covering six computer vision task families, each with pre-trained weights, built-in preprocessing transforms, and a unified loading API. Whether you need a lightweight classifier for edge deployment, a Faster R-CNN detector for production, or a video-understanding backbone, `torchvision.models` provides ready-to-use architectures that follow a consistent `weights=` convention introduced in v0.13.
+
+## Model Categories
+
+TorchVision organises its models into six task-oriented submodules:
+
+<CardGroup cols={3}>
+  <Card title="Classification" icon="layer-group" href="/models/classification">
+    Image-level labels on ImageNet-1K. Includes ResNet, EfficientNet, ViT, Swin Transformer, ConvNeXt, MaxViT, and more.
+  </Card>
+  <Card title="Detection" icon="crosshairs" href="/models/detection">
+    Object detection and instance segmentation. Faster R-CNN, FCOS, RetinaNet, SSD, Mask R-CNN, and Keypoint R-CNN.
+  </Card>
+  <Card title="Segmentation" icon="draw-polygon" href="/models/segmentation">
+    Pixel-wise semantic segmentation. FCN, DeepLabV3, and LR-ASPP trained on COCO/VOC.
+  </Card>
+  <Card title="Video" icon="film" href="/models/video">
+    Spatio-temporal action recognition on Kinetics-400. R3D, MC3, R(2+1)D, MViT, S3D, and Swin3D.
+  </Card>
+  <Card title="Optical Flow" icon="wind" href="/models/optical-flow">
+    Dense motion estimation between frames. RAFT with pre-trained weights on synthetic and real datasets.
+  </Card>
+  <Card title="Quantized" icon="microchip" href="/models/quantization">
+    INT8 quantized versions of popular classifiers for efficient CPU inference. Includes quantized ResNet, MobileNet, and more.
+  </Card>
+</CardGroup>
+
+---
+
+## The Model Registry API
+
+Starting in v0.14, TorchVision maintains a global registry of all model builder functions. The `get_model` and `list_models` helpers let you work with models by string name — useful for configuration-driven training scripts and hyperparameter sweeps.
+
+```python
+from torchvision.models import get_model, list_models
+
+# List every registered model across all task submodules
+all_models = list_models()
+print(all_models[:5])  # ['alexnet', 'convnext_base', 'convnext_large', ...]
+
+# Load a model by name, passing any kwargs the builder accepts
+model = get_model("resnet50", weights="DEFAULT")
+
+# Narrow the list to a specific submodule or pattern
+import torchvision.models as models
+
+classification_models = list_models(module=models)
+efficientnets = list_models(module=models, include="efficientnet*")
+print(efficientnets)
+# ['efficientnet_b0', 'efficientnet_b1', ..., 'efficientnet_v2_l']
+
+# Combine include and exclude patterns
+small_resnets = list_models(module=models, include="resnet*", exclude="*wide*")
+```
+
+### `list_models` parameters
+
+| Parameter | Type | Description |
+|---|---|---|
+| `module` | `ModuleType`, optional | Filter to models defined in this module (e.g. `torchvision.models` for classifiers only). |
+| `include` | `str` or `Iterable[str]`, optional | Unix shell-style wildcard pattern(s). The result is the **union** of all matching sets. |
+| `exclude` | `str` or `Iterable[str]`, optional | Wildcard pattern(s) applied **after** `include`. Models matching any exclude filter are removed. |
+
+### `get_model` parameters
+
+| Parameter | Type | Description |
+|---|---|---|
+| `name` | `str` | The registered model name (case-insensitive). |
+| `**config` | `Any` | Any keyword argument accepted by the underlying builder, such as `weights`, `num_classes`, or `progress`. |
+
+---
+
+## The `weights=` Parameter
+
+Every model builder in TorchVision accepts a `weights` keyword argument that controls pre-trained weight loading. The value can be a `WeightsEnum` member, a plain string shorthand, or `None`.
+
+```python
+from torchvision.models import resnet50, ResNet50_Weights
+
+# Best available weights — alias resolves to IMAGENET1K_V2 for ResNet-50
+resnet50(weights=ResNet50_Weights.DEFAULT)
+
+# A specific versioned checkpoint (76.1% top-1 on ImageNet-1K)
+resnet50(weights=ResNet50_Weights.IMAGENET1K_V1)
+
+# An improved checkpoint trained with the new recipe (80.9% top-1)
+resnet50(weights=ResNet50_Weights.IMAGENET1K_V2)
+
+# String shorthand — equivalent to the enum member above
+resnet50(weights="IMAGENET1K_V2")
+
+# Random initialisation — no weights downloaded
+resnet50(weights=None)
+```
+
+<Warning>
+  The legacy `pretrained=True` boolean parameter is **deprecated** and was removed in v0.15. Always use `weights=ModelName_Weights.DEFAULT` (or `weights=None`) instead.
+</Warning>
+
+Each `WeightsEnum` entry bundles the checkpoint URL, preprocessing transforms, and metadata (accuracy, parameter count, training recipe link) together. See the [Weights API](/models/weights-api) page for a full breakdown.
+
+---
+
+## Common Usage Patterns
+
+### Inference
+
+<Steps>
+  <Step title="Load weights and model">
+    Instantiate the model with the best available weights and switch to evaluation mode to disable dropout and freeze batch-norm statistics.
+
+    ```python
+    from torchvision.models import resnet50, ResNet50_Weights
+
+    weights = ResNet50_Weights.DEFAULT
+    model = resnet50(weights=weights)
+    model.eval()
+    ```
+  </Step>
+  <Step title="Build the preprocessing pipeline">
+    Retrieve the preprocessing transforms that were used during training — they are bundled directly onto the weights object so they always match the checkpoint.
+
+    ```python
+    preprocess = weights.transforms()
+    # ImageClassification(
+    #     crop_size=[224]
+    #     resize_size=[232]
+    #     mean=[0.485, 0.456, 0.406]
+    #     std=[0.229, 0.224, 0.225]
+    #     interpolation=InterpolationMode.BILINEAR
+    # )
+    ```
+  </Step>
+  <Step title="Run a forward pass">
+    Apply the transforms, add a batch dimension, and pass through the model.
+
+    ```python
+    from torchvision.io import decode_image
+
+    img = decode_image("photo.jpg")           # uint8 Tensor [C, H, W]
+    batch = preprocess(img).unsqueeze(0)      # float32 Tensor [1, C, H, W]
+
+    prediction = model(batch).squeeze(0).softmax(0)
+    class_id = prediction.argmax().item()
+    score = prediction[class_id].item()
+
+    category = weights.meta["categories"][class_id]
+    print(f"{category}: {100 * score:.1f}%")
+    ```
+  </Step>
+</Steps>
+
+<Tip>
+  Always call `model.eval()` before running inference. Forgetting this leaves batch-norm layers in training mode, which produces different (and incorrect) outputs when the batch size is 1.
+</Tip>
+
+---
+
+### Fine-Tuning for a Custom Task
+
+Transfer learning from ImageNet weights is one of the most common workflows in computer vision. The pattern below freezes the backbone and replaces only the classification head:
+
+```python
+import torch.nn as nn
+from torchvision.models import resnet50, ResNet50_Weights
+
+# 1. Load backbone with ImageNet weights
+model = resnet50(weights=ResNet50_Weights.DEFAULT)
+
+# 2. Freeze all backbone parameters
+for param in model.parameters():
+    param.requires_grad = False
+
+# 3. Replace the final fully-connected layer for a 10-class task.
+#    model.fc.in_features is 2048 for ResNet-50.
+model.fc = nn.Linear(model.fc.in_features, 10)
+
+# 4. Only model.fc parameters will be updated during training
+optimizer = torch.optim.Adam(model.fc.parameters(), lr=1e-3)
+```
+
+<Note>
+  When you replace `model.fc`, the new `nn.Linear` has `requires_grad=True` by default, so only the new head will receive gradient updates from the frozen-backbone loop above.
+</Note>
+
+For a full fine-tune (unfreezing the whole network), omit the freezing step and pass `model.parameters()` to the optimizer with a small learning rate (e.g. `1e-4`).
+
+---
+
+### Loading by String Name (Config-Driven)
+
+When building configurable training pipelines, load models entirely by name:
+
+```python
+from torchvision.models import get_model, get_model_weights
+
+model_name = "efficientnet_b0"   # read from config / CLI
+
+# Resolve the weights enum for the requested model
+weights_enum = get_model_weights(model_name)
+weights = weights_enum.DEFAULT
+
+model = get_model(model_name, weights=weights)
+preprocess = weights.transforms()
+model.eval()
+```
+
+---
+
+## PyTorch Hub
+
+Most TorchVision classifiers can be loaded directly through `torch.hub` without installing the full TorchVision package:
+
+```python
+import torch
+
+# Load by passing the weights name as a string
+model = torch.hub.load("pytorch/vision", "resnet50", weights="IMAGENET1K_V2")
+
+# Or resolve the weights object first
+weights = torch.hub.load(
+    "pytorch/vision",
+    "get_weight",
+    weights="ResNet50_Weights.IMAGENET1K_V2",
+)
+model = torch.hub.load("pytorch/vision", "resnet50", weights=weights)
+```
+
+<Note>
+  Detection models (`torchvision.models.detection`) require TorchVision to be installed locally because they depend on custom C++ operators that are not shipped via Hub.
+</Note>
+
+---
+
+## Cache & Environment
+
+Pre-trained weights are downloaded to a local cache on first use. Set the `TORCH_HOME` environment variable to control the cache directory:
+
+```bash
+export TORCH_HOME=/mnt/model-cache
+```
+
+Weights are fetched via [`torch.hub.load_state_dict_from_url`](https://pytorch.org/docs/stable/hub.html#torch.hub.load_state_dict_from_url), so proxy settings and SSL configuration follow the standard PyTorch hub conventions.
+
+<Warning>
+  Pre-trained models may carry their own licenses derived from the dataset used for training. Check the `weights.meta["recipe"]` URL for training details and confirm you have permission for your intended use case.
+</Warning>

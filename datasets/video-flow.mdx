@@ -1,0 +1,506 @@
+---
+title: "Video, Optical Flow, and Stereo Datasets in TorchVision"
+sidebarTitle: "Video & Flow"
+description: "Reference for TorchVision's video action-recognition, optical flow, and stereo matching datasets — Kinetics, HMDB51, Sintel, KittiFlow, and more."
+---
+
+TorchVision provides three families of temporal and multi-view datasets: **video** datasets for action recognition, **optical flow** datasets for dense motion estimation, and **stereo matching** datasets for disparity / depth estimation. All three families extend `VisionDataset` and follow the same transform convention; video datasets additionally ship with clip samplers compatible with distributed training.
+
+---
+
+## Video Datasets
+
+### Kinetics (400 / 600 / 700)
+
+The [DeepMind Kinetics](https://www.deepmind.com/open-source/kinetics) family of large-scale action-recognition benchmarks. The dataset treats each video as a collection of fixed-length clips; `__len__` returns the total number of clips, not videos.
+
+```python
+from torchvision.datasets import Kinetics
+
+Kinetics(
+    root: str | Path,
+    frames_per_clip: int,
+    num_classes: str = "400",       # "400" | "600" | "700"
+    split: str = "train",           # "train" | "val" | "test"
+    frame_rate: int | None = None,  # None → keep native rate
+    step_between_clips: int = 1,
+    transform: Callable | None = None,
+    extensions: tuple[str, ...] = ("avi", "mp4"),
+    download: bool = False,
+    num_download_workers: int = 1,
+    num_workers: int = 1,
+    output_format: str = "TCHW",    # "TCHW" | "THWC"
+)
+```
+
+**`__getitem__` returns** `(video, audio, label)`:
+
+| Return value | Shape / type | Description |
+|---|---|---|
+| `video` | `Tensor[T, C, H, W]` (TCHW) or `Tensor[T, H, W, C]` (THWC) | `T` frames as `uint8` |
+| `audio` | `Tensor[K, L]` | `K` audio channels, `L` sample points, `float` |
+| `label` | `int` | Action class index |
+
+```python
+from torchvision.datasets import Kinetics
+
+dataset = Kinetics(
+    root="/path/to/kinetics",
+    frames_per_clip=16,
+    split="train",
+    num_classes="400",
+    download=False,
+    output_format="TCHW",
+)
+
+video, audio, label = dataset[0]
+# video: Tensor[16, 3, H, W], audio: Tensor[K, L], label: int
+```
+
+The expected directory structure (after extraction) is:
+
+```
+root/
+└── train/
+    ├── abseiling/
+    │   ├── vid1.mp4
+    │   └── vid2.mp4
+    └── air_drumming/
+        └── vid3.mp4
+```
+
+---
+
+### HMDB51
+
+51-class human motion database with videos from movies and online sources.
+
+```python
+from torchvision.datasets import HMDB51
+
+HMDB51(
+    root: str | Path,           # directory of extracted video files
+    annotation_path: str,       # directory containing the split .txt files
+    frames_per_clip: int,
+    step_between_clips: int = 1,
+    frame_rate: int | None = None,
+    fold: int = 1,              # 1, 2, or 3
+    train: bool = True,
+    transform: Callable | None = None,
+    num_workers: int = 1,
+    output_format: str = "THWC",
+)
+```
+
+**`__getitem__` returns** `(video, audio, label)` — same layout as Kinetics.
+
+<Note>
+  Download the split annotation files separately from the [HMDB51 dataset page](https://serre-lab.clps.brown.edu/resource/hmdb-a-large-human-motion-database/). Pass the path to these files as `annotation_path`.
+</Note>
+
+---
+
+### UCF101
+
+101-class action recognition dataset collected from YouTube.
+
+```python
+from torchvision.datasets import UCF101
+
+UCF101(
+    root: str | Path,
+    annotation_path: str,   # path to UCF101 split annotation files
+    frames_per_clip: int,
+    step_between_clips: int = 1,
+    frame_rate: int | None = None,
+    fold: int = 1,          # 1, 2, or 3
+    train: bool = True,
+    transform: Callable | None = None,
+    num_workers: int = 1,
+    output_format: str = "THWC",
+)
+```
+
+**`__getitem__` returns** `(video, audio, label)`.
+
+<Note>
+  Annotation split files for UCF101 can be downloaded from the [THUMOS Challenge page](https://www.crcv.ucf.edu/data/UCF101/UCF101TrainTestSplits-RecognitionTask.zip).
+</Note>
+
+---
+
+### MovingMNIST
+
+Synthetic dataset of bouncing MNIST digits; useful for video prediction research.
+
+```python
+from torchvision.datasets import MovingMNIST
+
+MovingMNIST(
+    root: str | Path,
+    split: str | None = None,  # None (full) | "train" | "test"
+    split_ratio: int = 10,     # first N frames → train, remaining → test
+    download: bool = False,
+    transform: Callable | None = None,
+)
+```
+
+**`__getitem__` returns** `Tensor[T, H, W]` — a sequence of grayscale frames.
+
+---
+
+## Video Samplers
+
+For distributed training, TorchVision provides clip-aware samplers in `torchvision.datasets.samplers`:
+
+```python
+from torchvision.datasets.samplers import (
+    DistributedSampler,
+    RandomClipSampler,
+    UniformClipSampler,
+)
+```
+
+| Sampler | Description |
+|---|---|
+| `RandomClipSampler(video_clips, max_clips_per_video)` | Randomly samples up to `max_clips_per_video` clips from each video |
+| `UniformClipSampler(video_clips, num_clips_per_video)` | Uniformly samples exactly `num_clips_per_video` clips per video |
+| `DistributedSampler(dataset, group_size=1)` | Distributes groups of `group_size` consecutive clips across ranks; ensures temporally-adjacent clips stay on the same GPU |
+
+```python
+from torchvision.datasets import Kinetics
+from torchvision.datasets.samplers import DistributedSampler, RandomClipSampler
+
+dataset = Kinetics(root="...", frames_per_clip=16)
+
+# Single-GPU — limit clips per video
+sampler = RandomClipSampler(dataset.video_clips, max_clips_per_video=5)
+
+# Multi-GPU — group_size keeps consecutive clips on the same rank
+dist_sampler = DistributedSampler(dataset, num_replicas=4, rank=0, group_size=1)
+
+loader = torch.utils.data.DataLoader(dataset, sampler=sampler, batch_size=8)
+```
+
+---
+
+## Optical Flow Datasets
+
+All optical flow datasets extend the internal `FlowDataset` base class. `__getitem__` returns `(img1, img2, flow)` — a pair of consecutive frames and the ground-truth forward flow field. Datasets with a built-in validity mask return a 4-tuple `(img1, img2, flow, valid_flow_mask)`.
+
+Flow tensors have shape `(2, H, W)` (dx, dy channels) as `numpy.ndarray`.
+
+### Sintel
+
+Rendered synthetic sequences from the Blender short film, in **clean** and **final** render passes.
+
+```python
+from torchvision.datasets import Sintel
+
+Sintel(
+    root: str | Path,
+    split: str = "train",         # "train" | "test"
+    pass_name: str = "clean",     # "clean" | "final" | "both"
+    transforms: Callable | None = None,
+    loader: Callable = default_loader,
+)
+```
+
+**`__getitem__` returns** `(img1, img2, flow)` where flow is `None` when `split="test"`. Flow shape: `(2, H, W)`.
+
+```python
+from torchvision.datasets import Sintel
+
+dataset = Sintel(root="/path/to/sintel", split="train", pass_name="clean")
+img1, img2, flow = dataset[0]
+# img1, img2: PIL.Image
+# flow:       ndarray shape (2, H, W) — (dx, dy) per pixel
+```
+
+---
+
+### KittiFlow
+
+KITTI 2015 optical flow benchmark derived from driving sequences with sparse LiDAR-validated ground truth.
+
+```python
+from torchvision.datasets import KittiFlow
+
+KittiFlow(
+    root: str | Path,
+    split: str = "train",    # "train" | "test"
+    transforms: Callable | None = None,
+    loader: Callable = default_loader,
+)
+```
+
+**`__getitem__` always returns** `(img1, img2, flow, valid_flow_mask)` — a 4-tuple because `KittiFlow` has a built-in validity mask. `valid_flow_mask` is a boolean `ndarray` of shape `(H, W)` indicating which pixels have valid flow. Both `flow` and `valid_flow_mask` are `None` when `split="test"`.
+
+---
+
+### FlyingChairs
+
+Large synthetic dataset of 2D chair images composited over background images.
+
+```python
+from torchvision.datasets import FlyingChairs
+
+FlyingChairs(
+    root: str | Path,
+    split: str = "train",    # "train" | "val"
+    transforms: Callable | None = None,
+)
+```
+
+<Note>
+  You must also download `FlyingChairs_train_val.txt` from the [dataset page](https://lmb.informatik.uni-freiburg.de/resources/datasets/FlyingChairs.en.html) and place it under `root/FlyingChairs/`.
+</Note>
+
+**`__getitem__` returns** `(img1, img2, flow)`. Flow shape: `(2, H, W)`.
+
+---
+
+### FlyingThings3D
+
+Synthetic 3D scenes with randomly flying everyday objects; provides clean and final render passes, and supports left/right cameras.
+
+```python
+from torchvision.datasets import FlyingThings3D
+
+FlyingThings3D(
+    root: str | Path,
+    split: str = "train",       # "train" | "test"
+    pass_name: str = "clean",   # "clean" | "final" | "both"
+    camera: str = "left",       # "left" | "right" | "both"
+    transforms: Callable | None = None,
+    loader: Callable = default_loader,
+)
+```
+
+**`__getitem__` returns** `(img1, img2, flow)`. Flow shape: `(2, H, W)`.
+
+---
+
+### HD1K
+
+High-Definition 1K — driving sequences with dense flow annotation.
+
+```python
+from torchvision.datasets import HD1K
+
+HD1K(
+    root: str | Path,
+    split: str = "train",    # "train" | "test"
+    transforms: Callable | None = None,
+    loader: Callable = default_loader,
+)
+```
+
+**`__getitem__` returns** `(img1, img2, flow, valid_flow_mask)` (built-in validity mask). Shape: `(2, H, W)`.
+
+---
+
+### Optical Flow Dataset Summary
+
+| Class | Split support | Validity mask | Flow format |
+|---|---|---|---|
+| `Sintel` | `train` / `test`, pass `clean`/`final`/`both` | No (can be generated by transforms) | `ndarray (2, H, W)` |
+| `KittiFlow` | `train` / `test` | ✅ Built-in | `ndarray (2, H, W)` |
+| `FlyingChairs` | `train` / `val` | No | `ndarray (2, H, W)` |
+| `FlyingThings3D` | `train` / `test`, pass + camera | No | `ndarray (2, H, W)` |
+| `HD1K` | `train` / `test` | ✅ Built-in | `ndarray (2, H, W)` |
+
+---
+
+## Stereo Matching Datasets
+
+All stereo datasets extend `StereoMatchingDataset`. `__getitem__` returns `(img_left, img_right, disparity)` or a 4-tuple `(img_left, img_right, disparity, valid_mask)` when a built-in mask is available. Images are PIL Images; disparity is an `ndarray` of shape `(1, H, W)` (left disparity only), or `None` for test splits without annotations.
+
+```python
+from torchvision.datasets import Kitti2015Stereo
+
+dataset = Kitti2015Stereo(root="/path/to/kitti", split="train")
+img_left, img_right, disparity, valid_mask = dataset[0]
+# img_left, img_right: PIL.Image
+# disparity:  ndarray (1, H, W) — left disparity map in pixels
+# valid_mask: ndarray (H, W)   — boolean mask (built-in for KITTI)
+```
+
+---
+
+### Kitti2012Stereo
+
+KITTI 2012 stereo benchmark from driving sequences.
+
+```python
+from torchvision.datasets import Kitti2012Stereo
+
+Kitti2012Stereo(
+    root: str | Path,
+    split: str = "train",    # "train" | "test"
+    transforms: Callable | None = None,
+)
+```
+
+---
+
+### Kitti2015Stereo
+
+KITTI 2015 stereo benchmark with denser LiDAR-derived ground truth.
+
+```python
+from torchvision.datasets import Kitti2015Stereo
+
+Kitti2015Stereo(
+    root: str | Path,
+    split: str = "train",    # "train" | "test"
+    transforms: Callable | None = None,
+)
+```
+
+---
+
+### CarlaStereo
+
+Carla simulator high-resolution training data, linked from the CREStereo project.
+
+```python
+from torchvision.datasets import CarlaStereo
+
+CarlaStereo(
+    root: str | Path,          # root must contain carla-highres/trainingF/
+    transforms: Callable | None = None,
+)
+```
+
+---
+
+### Middlebury2014Stereo
+
+Indoor stereo scenes with photorealistic lighting variation.
+
+```python
+from torchvision.datasets import Middlebury2014Stereo
+
+Middlebury2014Stereo(
+    root: str | Path,
+    split: str = "train",                # "train" | "additional" | "test"
+    calibration: str | None = "perfect", # "perfect" | "imperfect" | "both" | None (test only)
+    use_ambient_views: bool = False,
+    transforms: Callable | None = None,
+    download: bool = False,
+)
+```
+
+---
+
+### CREStereo
+
+Synthetic stereo pairs across four object domains (ShapeNet, reflective objects, trees, holes).
+
+```python
+from torchvision.datasets import CREStereo
+
+CREStereo(
+    root: str | Path,    # root must contain CREStereo/{shapenet,reflective,tree,hole}/
+    transforms: Callable | None = None,
+)
+```
+
+---
+
+### FallingThingsStereo
+
+Synthetic objects dropped onto various backgrounds.
+
+```python
+from torchvision.datasets import FallingThingsStereo
+
+FallingThingsStereo(
+    root: str | Path,
+    variant: str = "single",  # "single" | "mixed" | "fat"
+    transforms: Callable | None = None,
+)
+```
+
+---
+
+### SceneFlowStereo
+
+Covers three variants of the synthetic SceneFlow benchmark.
+
+```python
+from torchvision.datasets import SceneFlowStereo
+
+SceneFlowStereo(
+    root: str | Path,
+    variant: str = "FlyingThings3D",  # "FlyingThings3D" | "Driving" | "Monkaa"
+    pass_name: str = "clean",          # "clean" | "final" | "both"
+    transforms: Callable | None = None,
+)
+```
+
+---
+
+### SintelStereo
+
+Stereo variant of the Sintel synthetic benchmark.
+
+```python
+from torchvision.datasets import SintelStereo
+
+SintelStereo(
+    root: str | Path,
+    pass_name: str = "final",    # "final" | "clean" | "both"
+    transforms: Callable | None = None,
+)
+```
+
+---
+
+### InStereo2k
+
+Real-world indoor stereo dataset with 2 000 scene pairs.
+
+```python
+from torchvision.datasets import InStereo2k
+
+InStereo2k(
+    root: str | Path,
+    split: str = "train",    # "train" | "test"
+    transforms: Callable | None = None,
+)
+```
+
+---
+
+### ETH3DStereo
+
+High-resolution indoor and outdoor stereo pairs from the ETH3D benchmark.
+
+```python
+from torchvision.datasets import ETH3DStereo
+
+ETH3DStereo(
+    root: str | Path,
+    split: str = "train",    # "train" | "test"
+    transforms: Callable | None = None,
+)
+```
+
+---
+
+## Stereo Matching Dataset Summary
+
+| Class | Split support | Built-in mask | `download=True` |
+|---|---|---|---|
+| `Kitti2012Stereo` | `train` / `test` | No | ❌ Manual |
+| `Kitti2015Stereo` | `train` / `test` | No | ❌ Manual |
+| `CarlaStereo` | training only | No | ❌ Manual |
+| `Middlebury2014Stereo` | `train` / `additional` / `test` | No | ✅ |
+| `CREStereo` | training only | No | ❌ Manual |
+| `FallingThingsStereo` | `single` / `mixed` / `fat` variants | No | ❌ Manual |
+| `SceneFlowStereo` | training only | No | ❌ Manual |
+| `SintelStereo` | training only | No | ❌ Manual |
+| `InStereo2k` | `train` / `test` | No | ❌ Manual |
+| `ETH3DStereo` | `train` / `test` | No | ❌ Manual |

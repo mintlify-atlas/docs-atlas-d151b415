@@ -1,0 +1,199 @@
+---
+title: "TorchVision Datasets: Load Vision Benchmarks Easily"
+sidebarTitle: "Overview"
+description: "Load popular vision datasets with one line of code. TorchVision provides 60+ built-in datasets for classification, detection, segmentation, and video."
+---
+
+TorchVision's dataset module gives you ready-to-use `torch.utils.data.Dataset` implementations for the most widely-used computer vision benchmarks. Every dataset follows a consistent interface that slots directly into `torch.utils.data.DataLoader`, making it straightforward to swap one benchmark for another without changing your training loop.
+
+<Warning>
+  TorchVision **does not host or distribute** any dataset files. When you set `download=True` the library fetches files from the dataset's original source. Always check the license of each dataset before using it in your project.
+</Warning>
+
+## VisionDataset Base Class
+
+All datasets inherit from `torchvision.datasets.VisionDataset`, which extends `torch.utils.data.Dataset` and enforces a consistent transform contract.
+
+```python
+class VisionDataset(torch.utils.data.Dataset):
+    def __init__(
+        self,
+        root: str | Path = None,
+        transforms: Callable | None = None,       # joint image+target transform
+        transform: Callable | None = None,         # image-only transform
+        target_transform: Callable | None = None,  # target-only transform
+    ): ...
+```
+
+### Transform parameters
+
+| Parameter | Applied to | Notes |
+|---|---|---|
+| `transform` | Input image only | Receives a PIL Image (or Tensor depending on loader), returns transformed image |
+| `target_transform` | Target/label only | Receives the raw label, returns transformed label |
+| `transforms` | **(image, target)** jointly | Receives and returns a `(image, target)` pair — mutually exclusive with the two above |
+
+<Note>
+  `transforms` and the `transform`/`target_transform` pair are **mutually exclusive**. Passing both raises a `ValueError`.
+</Note>
+
+## Generic Folder Loaders
+
+When your data is already organized into class subdirectories, you don't need a specialized dataset class.
+
+### DatasetFolder
+
+`DatasetFolder` scans a root directory for class subdirectories and builds a flat list of `(sample_path, class_index)` tuples. It accepts any file type via an `extensions` allow-list or a custom `is_valid_file` predicate.
+
+```
+root/
+├── class_a/
+│   ├── file1.ext
+│   └── file2.ext
+└── class_b/
+    ├── file3.ext
+    └── file4.ext
+```
+
+```python
+DatasetFolder(
+    root: str | Path,
+    loader: Callable[[str], Any],
+    extensions: tuple[str, ...] | None = None,
+    transform: Callable | None = None,
+    target_transform: Callable | None = None,
+    is_valid_file: Callable[[str], bool] | None = None,
+    allow_empty: bool = False,
+)
+```
+
+**Key attributes** exposed after construction:
+
+| Attribute | Type | Description |
+|---|---|---|
+| `classes` | `list[str]` | Sorted list of class folder names |
+| `class_to_idx` | `dict[str, int]` | Maps class name → integer label |
+| `samples` | `list[tuple[str, int]]` | All `(path, class_index)` pairs |
+| `targets` | `list[int]` | Class index for every sample |
+
+### ImageFolder
+
+`ImageFolder` is a thin specialization of `DatasetFolder` pre-configured for common image extensions (`.jpg`, `.jpeg`, `.png`, `.ppm`, `.bmp`, `.pgm`, `.tif`, `.tiff`, `.webp`).
+
+```python
+ImageFolder(
+    root: str | Path,
+    transform: Callable | None = None,
+    target_transform: Callable | None = None,
+    loader: Callable[[str], Any] = default_loader,
+    is_valid_file: Callable[[str], bool] | None = None,
+    allow_empty: bool = False,
+)
+```
+
+<Steps>
+  <Step title="Organize your images">
+    Create one subdirectory per class under your root directory. Subdirectory names become the class labels.
+  </Step>
+  <Step title="Build the dataset">
+    Pass the root path and any desired transforms to `ImageFolder`.
+  </Step>
+  <Step title="Wrap in a DataLoader">
+    Feed the dataset into `torch.utils.data.DataLoader` for batching, shuffling, and multi-process loading.
+  </Step>
+</Steps>
+
+```python
+import torch
+import torchvision.transforms.v2 as T
+from torchvision.datasets import ImageFolder
+
+transform = T.Compose([
+    T.RandomResizedCrop(224, antialias=True),
+    T.ToDtype(torch.float32, scale=True),
+])
+
+dataset = ImageFolder(root="/path/to/images", transform=transform)
+loader = torch.utils.data.DataLoader(dataset, batch_size=32, shuffle=True)
+
+for images, labels in loader:
+    # images: Tensor[B, C, H, W], labels: Tensor[B]
+    ...
+```
+
+## Using `wrap_dataset_for_transforms_v2`
+
+The `torchvision.transforms.v2` API can operate on richer tensor types — `BoundingBoxes`, `Mask`, etc. — but many built-in datasets return plain PIL Images and dicts. The `wrap_dataset_for_transforms_v2` helper adapts *any* existing dataset so that its `__getitem__` returns those typed tensors automatically.
+
+```python
+from torchvision.datasets import CocoDetection, wrap_dataset_for_transforms_v2
+
+base = CocoDetection(root="...", annFile="...")
+dataset = wrap_dataset_for_transforms_v2(base)
+
+image, target = dataset[0]
+# image:  tv_tensors.Image
+# target: dict with tv_tensors.BoundingBoxes, tv_tensors.Mask, etc.
+```
+
+<Tip>
+  Use `wrap_dataset_for_transforms_v2` whenever you want to apply `torchvision.transforms.v2` transforms to detection or segmentation datasets and need coordinate-aware augmentations like `RandomHorizontalFlip` to also flip the bounding boxes.
+</Tip>
+
+## Using Datasets with DataLoader
+
+All TorchVision datasets are standard `torch.utils.data.Dataset` objects, so you can use the full PyTorch DataLoader API.
+
+```python
+import torch
+from torchvision.datasets import CIFAR10
+import torchvision.transforms.v2 as T
+
+transform = T.Compose([
+    T.ToImage(),
+    T.ToDtype(torch.float32, scale=True),
+    T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+])
+
+train_dataset = CIFAR10(root="./data", train=True, download=True, transform=transform)
+val_dataset   = CIFAR10(root="./data", train=False, download=True, transform=transform)
+
+train_loader = torch.utils.data.DataLoader(
+    train_dataset,
+    batch_size=128,
+    shuffle=True,
+    num_workers=4,
+    pin_memory=True,
+)
+val_loader = torch.utils.data.DataLoader(
+    val_dataset,
+    batch_size=256,
+    shuffle=False,
+    num_workers=4,
+)
+```
+
+## Dataset Categories
+
+TorchVision ships with datasets across six task categories:
+
+| Category | Representative datasets | Page |
+|---|---|---|
+| **Image Classification** | CIFAR-10/100, ImageNet, MNIST, Flowers102, Food101, STL10 … | [Classification](/datasets/classification) |
+| **Object Detection** | CocoDetection, VOCDetection, Kitti, WIDERFace … | [Detection & Segmentation](/datasets/detection-segmentation) |
+| **Semantic Segmentation** | VOCSegmentation, Cityscapes, SBDataset … | [Detection & Segmentation](/datasets/detection-segmentation) |
+| **Video / Action Recognition** | Kinetics (400/600/700), HMDB51, UCF101, MovingMNIST | [Video & Flow](/datasets/video-flow) |
+| **Optical Flow** | Sintel, KittiFlow, FlyingChairs, FlyingThings3D, HD1K | [Video & Flow](/datasets/video-flow) |
+| **Stereo Matching** | Kitti2012Stereo, Kitti2015Stereo, Middlebury2014Stereo … | [Video & Flow](/datasets/video-flow) |
+
+<CardGroup cols={3}>
+  <Card title="Classification" icon="image" href="/datasets/classification">
+    CIFAR, ImageNet, MNIST, fine-grained recognition, scene datasets, and more.
+  </Card>
+  <Card title="Detection & Segmentation" icon="vector-square" href="/datasets/detection-segmentation">
+    COCO, Pascal VOC, Cityscapes, Kitti, and others with bounding box or mask targets.
+  </Card>
+  <Card title="Video & Flow" icon="film" href="/datasets/video-flow">
+    Kinetics, HMDB51, UCF101, optical flow, and stereo disparity datasets.
+  </Card>
+</CardGroup>

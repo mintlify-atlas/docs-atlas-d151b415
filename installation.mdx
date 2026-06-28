@@ -1,0 +1,165 @@
+---
+title: "Install TorchVision and PyTorch for Your Platform"
+sidebarTitle: "Installation"
+description: "Step-by-step instructions for installing TorchVision via pip or conda, building from source, and configuring image and video backends."
+---
+
+Installing TorchVision correctly means installing it alongside a compatible version of PyTorch for your operating system, Python version, and hardware (CPU, CUDA, or ROCm). The fastest path for most users is the official PyTorch installer wizard at [pytorch.org/get-started/locally](https://pytorch.org/get-started/locally/), which generates the exact command for your environment. The sections below cover every common scenario in detail.
+
+## Quick Install
+
+The recommended way to install TorchVision is to install it together with PyTorch in a single command. Both `pip` and `conda` are fully supported.
+
+<CodeGroup>
+```bash pip (CPU)
+pip install torch torchvision
+```
+
+```bash pip (CUDA 12.6)
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
+```
+
+```bash pip (CUDA 12.8)
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+```
+
+```bash conda (CPU)
+conda install pytorch torchvision cpuonly -c pytorch
+```
+
+```bash conda (CUDA 12.6)
+conda install pytorch torchvision pytorch-cuda=12.6 -c pytorch -c nvidia
+```
+</CodeGroup>
+
+<Warning>
+  Always install `torch` and `torchvision` **in the same command**. Installing them separately can result in version mismatches that cause cryptic import errors or silent numerical bugs.
+</Warning>
+
+## Version Compatibility
+
+Each TorchVision release is paired with a specific PyTorch release. Use the table below to choose matching versions, or let the [official wizard](https://pytorch.org/get-started/locally/) pick for you.
+
+| `torch` | `torchvision` | Python             |
+| ------- | ------------- | ------------------ |
+| `2.12`  | `0.27`        | `>=3.10`, `<=3.14` |
+| `2.11`  | `0.26`        | `>=3.10`, `<=3.14` |
+| `2.10`  | `0.25`        | `>=3.10`, `<=3.14` |
+| `2.9`   | `0.24`        | `>=3.10`, `<=3.14` |
+| `2.8`   | `0.23`        | `>=3.9`, `<=3.13`  |
+| `2.7`   | `0.22`        | `>=3.9`, `<=3.13`  |
+| `2.6`   | `0.21`        | `>=3.9`, `<=3.12`  |
+
+To pin specific versions with pip:
+
+```bash
+pip install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cu126
+```
+
+## Verify Your Installation
+
+After installing, run the following to confirm both packages are importable and report the expected versions:
+
+```python
+import torch
+import torchvision
+
+print(torch.__version__)        # e.g. 2.6.0+cu126
+print(torchvision.__version__)  # e.g. 0.21.0+cu126
+```
+
+If either import fails, the most common cause is a version mismatch. Re-install both packages in a single command as shown above.
+
+## CUDA Versions
+
+TorchVision ships pre-built wheels for the CUDA versions supported by the corresponding PyTorch release. The index URL you pass to pip selects the CUDA build:
+
+| CUDA version | `--index-url`                                          |
+| ------------ | ------------------------------------------------------ |
+| CPU only     | `https://download.pytorch.org/whl/cpu`                 |
+| CUDA 12.6    | `https://download.pytorch.org/whl/cu126`               |
+| CUDA 12.8    | `https://download.pytorch.org/whl/cu128`               |
+| ROCm 6.2     | `https://download.pytorch.org/whl/rocm6.2`             |
+
+<Info>
+  Your CUDA version must match the version of the CUDA toolkit installed on your system. Run `nvcc --version` or `nvidia-smi` to check.
+</Info>
+
+## Build From Source
+
+Building from source is required when contributing to TorchVision or when you need a build targeting a non-standard CUDA version. Start with the **nightly** PyTorch build, then clone and install TorchVision in editable mode:
+
+```bash
+# 1. Install nightly PyTorch (see pytorch.org for the exact command)
+pip install --pre torch --index-url https://download.pytorch.org/whl/nightly/cu126
+
+# 2. (Optional) Install native codec libraries for fast image I/O
+conda install libpng libjpeg-turbo libwebp -c pytorch
+
+# 3. Clone and build TorchVision
+git clone https://github.com/pytorch/vision.git
+cd vision
+pip install -e . -v --no-build-isolation
+```
+
+On macOS, prefix the pip install with compiler flags:
+
+```bash
+MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ pip install -e . -v --no-build-isolation
+```
+
+GPU support is built automatically when CUDA is detected. To force a CUDA build regardless:
+
+```bash
+FORCE_CUDA=1 pip install -e . -v --no-build-isolation
+```
+
+<Note>
+  Use `TORCHVISION_INCLUDE` and `TORCHVISION_LIBRARY` environment variables to point the build system at non-standard locations for `libpng`, `libjpeg-turbo`, or `libwebp`.
+</Note>
+
+## Optional Native Dependencies
+
+TorchVision's `torchvision.io` module can use native C++ codecs for significantly faster image reading and writing when the following libraries are present at build time:
+
+| Library        | Purpose                                  | Install (conda)                                    |
+| -------------- | ---------------------------------------- | -------------------------------------------------- |
+| `libpng`       | Native PNG encode / decode               | `conda install libpng -c pytorch`                  |
+| `libjpeg-turbo`| Fast JPEG encode / decode (SIMD)         | `conda install libjpeg-turbo -c pytorch`           |
+| `libwebp`      | WebP encode / decode                     | `conda install libwebp -c pytorch`                 |
+
+Without these libraries, `torchvision.io` falls back to a slower pure-Python path via Pillow.
+
+## Configuring Image Backends
+
+TorchVision defaults to PIL (Pillow) for image loading. You can switch to the faster `accimage` backend (Intel IPP) at runtime:
+
+```python
+import torchvision
+
+# Set backend to accimage (must be installed separately: pip install accimage)
+torchvision.set_image_backend("accimage")
+
+# Verify
+print(torchvision.get_image_backend())  # "accimage"
+
+# Revert to PIL
+torchvision.set_image_backend("PIL")
+```
+
+Valid values for `set_image_backend` are `"PIL"` and `"accimage"`. Passing any other string raises a `ValueError`.
+
+## Configuring Video Backends
+
+TorchVision uses [PyAV](https://pyav.org/) (Python FFmpeg bindings) as its video backend. PyAV is installed automatically as a dependency and requires no configuration for typical use:
+
+```python
+import torchvision
+
+# Query the active video backend
+print(torchvision.get_video_backend())  # "pyav"
+```
+
+<Note>
+  PyAV wraps the FFmpeg libraries. For GPU-accelerated video decoding, ensure that your FFmpeg build was compiled with the appropriate hardware acceleration flags.
+</Note>

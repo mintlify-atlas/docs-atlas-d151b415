@@ -1,0 +1,446 @@
+---
+title: "TorchVision Ops: Vision Primitives and Layers"
+sidebarTitle: "Ops"
+description: "Complete reference for torchvision.ops — box utilities, RoI pooling, focal loss, deformable convolutions, FPN, and regularization primitives for detection models."
+---
+
+`torchvision.ops` is a library of vision-specific operations that sit below the model level: box manipulation, region-of-interest pooling, custom losses, deformable layers, and regularization blocks. These primitives are used internally by TorchVision's detection and segmentation models (Faster R-CNN, RetinaNet, Mask R-CNN, etc.) and are fully available for use in custom architectures. Many operations include both a functional form and an `nn.Module` wrapper.
+
+---
+
+## Box Operations
+
+All box functions expect tensors in `(x1, y1, x2, y2)` (XYXY) format unless noted otherwise. Coordinates are floating-point.
+
+### Non-Maximum Suppression
+
+```python
+import torch
+from torchvision.ops import nms, batched_nms
+
+boxes = torch.tensor([
+    [100., 50., 300., 250.],
+    [110., 55., 310., 260.],  # overlapping box
+    [400., 100., 600., 350.],
+], dtype=torch.float32)
+scores = torch.tensor([0.9, 0.75, 0.85])
+
+# Standard NMS — returns indices of kept boxes
+keep = nms(boxes, scores, iou_threshold=0.5)
+print(keep)  # tensor([0, 2]) — indices of kept boxes
+
+# Batched NMS — applies NMS per class (idxs selects the class)
+idxs = torch.tensor([0, 0, 1])
+keep_batched = batched_nms(boxes, scores, idxs, iou_threshold=0.5)
+```
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `nms` | `(boxes, scores, iou_threshold) -> Tensor` | Standard NMS; returns kept indices sorted by descending score |
+| `batched_nms` | `(boxes, scores, idxs, iou_threshold) -> Tensor` | NMS applied independently per element in `idxs` |
+
+### IoU Metrics
+
+```python
+from torchvision.ops import box_iou, generalized_box_iou, distance_box_iou, complete_box_iou
+
+boxes1 = torch.tensor([[0., 0., 10., 10.]])
+boxes2 = torch.tensor([[5., 5., 15., 15.], [20., 20., 30., 30.]])
+
+iou = box_iou(boxes1, boxes2)           # Tensor[1, 2]
+giou = generalized_box_iou(boxes1, boxes2)  # Tensor[1, 2] — handles non-overlapping boxes
+diou = distance_box_iou(boxes1, boxes2)     # Tensor[1, 2] — adds centre-point distance term
+ciou = complete_box_iou(boxes1, boxes2)     # Tensor[1, 2] — adds aspect-ratio consistency term
+```
+
+| Function | Return | Notes |
+|----------|--------|-------|
+| `box_iou` | `Tensor[N, M]` | Standard intersection-over-union |
+| `generalized_box_iou` | `Tensor[N, M]` | GIoU — non-zero gradient even for non-overlapping boxes |
+| `distance_box_iou` | `Tensor[N, M]` | DIoU — minimises centre-point distance |
+| `complete_box_iou` | `Tensor[N, M]` | CIoU — includes aspect-ratio penalty |
+
+### Box Utilities
+
+```python
+from torchvision.ops import (
+    box_area, box_convert,
+    clip_boxes_to_image, remove_small_boxes, masks_to_boxes
+)
+
+# Compute area (supports XYXY by default, also accepts XYWH / CXCYWH via fmt=)
+areas = box_area(boxes)  # Tensor[N]
+
+# Convert between formats: "xyxy", "xywh", "cxcywh"
+xywh_boxes = box_convert(boxes, in_fmt="xyxy", out_fmt="xywh")
+cxcywh_boxes = box_convert(boxes, in_fmt="xyxy", out_fmt="cxcywh")
+
+# Clip boxes to image boundaries
+clipped = clip_boxes_to_image(boxes, size=(480, 640))  # (H, W)
+
+# Remove tiny boxes (degenerate proposals)
+keep = remove_small_boxes(boxes, min_size=10.0)  # returns valid indices
+
+# Convert binary segmentation masks to bounding boxes
+masks = torch.zeros(3, 100, 100, dtype=torch.bool)
+masks[0, 20:50, 30:70] = True
+tight_boxes = masks_to_boxes(masks)  # Tensor[3, 4] in XYXY format
+```
+
+---
+
+## RoI Pooling
+
+Region-of-Interest (RoI) operations extract fixed-size feature maps for each proposed bounding box, enabling box-specific classification and regression heads.
+
+### RoIAlign
+
+```python
+from torchvision.ops import RoIAlign
+import torch
+
+roi_align = RoIAlign(
+    output_size=(7, 7),
+    spatial_scale=1.0 / 16,  # feature map stride (e.g., 16 for a stride-16 backbone)
+    sampling_ratio=-1,        # -1 = adaptive; >0 = fixed grid per bin
+    aligned=True,             # half-pixel offset (recommended)
+)
+
+feature_map = torch.rand(1, 256, 56, 56)
+# rois: [batch_idx, x1, y1, x2, y2] in image coordinates
+rois = torch.tensor([[0., 10., 10., 100., 100.]])
+pooled = roi_align(feature_map, [rois[:, 1:]])  # Tensor[1, 256, 7, 7]
+```
+
+`RoIAlign` is differentiable and preferred over `RoIPool` for most use cases. The `aligned=True` option shifts coordinates by half a pixel to better align with the feature grid, matching the Detectron2 convention.
+
+### Other RoI Poolers
+
+| Class | Description |
+|-------|-------------|
+| `RoIPool(output_size, spatial_scale)` | Hard max-pool; not differentiable w.r.t. coordinates |
+| `PSRoIAlign(output_size, spatial_scale, sampling_ratio)` | Position-sensitive RoI align (R-FCN) |
+| `PSRoIPool(output_size, spatial_scale)` | Position-sensitive max-pool |
+| `MultiScaleRoIAlign(featmap_names, output_size, sampling_ratio)` | Assigns each RoI to a feature level by scale; used in Faster R-CNN + FPN |
+
+```python
+from torchvision.ops import MultiScaleRoIAlign
+
+# Used inside Faster R-CNN / Mask R-CNN
+roi_pooler = MultiScaleRoIAlign(
+    featmap_names=["0", "1", "2", "3"],
+    output_size=7,
+    sampling_ratio=2,
+)
+```
+
+---
+
+## Loss Functions
+
+### Focal Loss
+
+`sigmoid_focal_loss` addresses class imbalance in dense detection by down-weighting well-classified examples:
+
+```python
+from torchvision.ops import sigmoid_focal_loss
+import torch
+
+# Both tensors: Tensor[N, C], float
+inputs = torch.randn(8, 80)   # raw logits
+targets = torch.zeros(8, 80)
+targets[0, 3] = 1.0           # class 3 positive
+
+loss = sigmoid_focal_loss(
+    inputs, targets,
+    alpha=0.25,     # balances positive vs negative examples
+    gamma=2.0,      # focusing parameter; 0 = standard BCE
+    reduction="sum",
+)
+```
+
+### IoU-Based Losses
+
+These losses operate directly on box coordinates, providing smooth gradients even when boxes do not overlap:
+
+```python
+from torchvision.ops import (
+    generalized_box_iou_loss,
+    distance_box_iou_loss,
+    complete_box_iou_loss,
+)
+
+pred_boxes = torch.tensor([[10., 10., 50., 50.]])
+gt_boxes   = torch.tensor([[15., 15., 55., 55.]])
+
+giou_loss = generalized_box_iou_loss(pred_boxes, gt_boxes, reduction="mean")
+diou_loss = distance_box_iou_loss(pred_boxes, gt_boxes, reduction="mean")
+ciou_loss = complete_box_iou_loss(pred_boxes, gt_boxes, reduction="mean")
+```
+
+| Loss function | Notes |
+|---------------|-------|
+| `generalized_box_iou_loss` | GIoU loss; non-zero gradient for non-overlapping boxes |
+| `distance_box_iou_loss` | DIoU loss; penalises centre-point distance |
+| `complete_box_iou_loss` | CIoU loss; adds aspect-ratio consistency term |
+
+---
+
+## Layers and Modules
+
+### Deformable Convolution
+
+`DeformConv2d` implements Deformable Convolutional Networks v2 ([Zhu et al., 2019](https://arxiv.org/abs/1811.11168)). It learns spatial sampling offsets and modulation masks that allow the receptive field to adapt to object shape.
+
+```python
+from torchvision.ops import DeformConv2d, deform_conv2d
+import torch
+
+# Module form
+dcn = DeformConv2d(
+    in_channels=64,
+    out_channels=64,
+    kernel_size=3,
+    stride=1,
+    padding=1,
+)
+
+x = torch.rand(1, 64, 32, 32)
+kH, kW = 3, 3
+
+# Offset: Tensor[B, 2 * kH * kW, out_H, out_W]
+offset = torch.rand(1, 2 * kH * kW, 32, 32)
+# Mask (v2 only): Tensor[B, kH * kW, out_H, out_W]
+mask = torch.sigmoid(torch.rand(1, kH * kW, 32, 32))
+
+out = dcn(x, offset, mask)  # Tensor[1, 64, 32, 32]
+```
+
+<Note>
+  `offset` and `mask` are typically produced by a small auxiliary convolutional head whose output spatial size matches that of the DCN output. When `mask` is `None`, the layer reverts to Deformable Conv v1 behaviour.
+</Note>
+
+### Feature Pyramid Network
+
+`FeaturePyramidNetwork` takes a `dict` of multi-scale feature maps and produces same-channel FPN representations through lateral connections and top-down merging:
+
+```python
+from torchvision.ops import FeaturePyramidNetwork
+import torch
+from collections import OrderedDict
+
+fpn = FeaturePyramidNetwork(
+    in_channels_list=[256, 512, 1024, 2048],  # backbone channel counts per level
+    out_channels=256,
+    extra_blocks=None,  # optionally add P6, P7 via LastLevelMaxPool or LastLevelP6P7
+)
+
+# Provide an OrderedDict of feature maps from your backbone
+backbone_features = OrderedDict([
+    ("layer1", torch.rand(1, 256, 56, 56)),
+    ("layer2", torch.rand(1, 512, 28, 28)),
+    ("layer3", torch.rand(1, 1024, 14, 14)),
+    ("layer4", torch.rand(1, 2048, 7, 7)),
+])
+
+fpn_features = fpn(backbone_features)
+# Each value: Tensor[1, 256, H, W]
+```
+
+### Conv2dNormActivation / Conv3dNormActivation
+
+Fused Conv → Norm → Activation blocks with sensible defaults. Used throughout EfficientNet, MobileNet, Swin, and Video Swin:
+
+```python
+from torchvision.ops import Conv2dNormActivation, Conv3dNormActivation
+import torch.nn as nn
+
+# 2D: Conv2d → BatchNorm2d → ReLU (defaults)
+block_2d = Conv2dNormActivation(
+    in_channels=32,
+    out_channels=64,
+    kernel_size=3,
+    stride=2,
+    norm_layer=nn.BatchNorm2d,       # default
+    activation_layer=nn.ReLU,        # default
+)
+
+# 3D variant for video models: Conv3d → BatchNorm3d → ReLU
+block_3d = Conv3dNormActivation(
+    in_channels=3,
+    out_channels=64,
+    kernel_size=3,
+    norm_layer=nn.BatchNorm3d,
+)
+```
+
+### SqueezeExcitation
+
+Channel-wise attention from [Hu et al., 2018](https://arxiv.org/abs/1709.01507):
+
+```python
+from torchvision.ops import SqueezeExcitation
+import torch
+
+se = SqueezeExcitation(
+    input_channels=64,
+    squeeze_channels=16,   # bottleneck width (typically input_channels // 4)
+)
+
+x = torch.rand(1, 64, 14, 14)
+out = se(x)  # same shape — applies channel-wise scaling
+```
+
+### MLP
+
+Multi-layer perceptron module used in transformer architectures (Swin, MViT):
+
+```python
+from torchvision.ops import MLP
+import torch
+
+mlp = MLP(
+    in_channels=768,
+    hidden_channels=[3072, 768],  # list of layer widths
+    dropout=0.1,
+)
+
+x = torch.rand(1, 196, 768)
+out = mlp(x)  # Tensor[1, 196, 768]
+```
+
+### FrozenBatchNorm2d
+
+BatchNorm with permanently frozen running statistics and affine parameters. Used in detection backbones where fine-tuning BN stats is undesirable:
+
+```python
+from torchvision.ops import FrozenBatchNorm2d
+import torch
+
+fbn = FrozenBatchNorm2d(num_features=64)
+x = torch.rand(2, 64, 14, 14)
+out = fbn(x)  # statistics never updated during training
+```
+
+### Permute
+
+Lightweight dimension-permutation module (used in Swin Transformer patch merging):
+
+```python
+from torchvision.ops import Permute
+import torch
+
+perm = Permute(dims=[0, 2, 3, 1])  # NCHW → NHWC
+x = torch.rand(1, 64, 14, 14)
+out = perm(x)  # Tensor[1, 14, 14, 64]
+```
+
+---
+
+## Regularization
+
+### Stochastic Depth (Drop Path)
+
+`StochasticDepth` randomly drops entire residual branches during training. It is the primary regularizer in Swin Transformer, ConvNeXt, and MViT:
+
+```python
+from torchvision.ops import StochasticDepth, stochastic_depth
+import torch
+
+# Module form — plug in as a residual wrapper
+sd = StochasticDepth(p=0.1, mode="row")
+
+residual = torch.rand(4, 64, 14, 14)
+out = sd(residual)  # randomly zeroed rows during training
+
+# Functional form
+out = stochastic_depth(residual, p=0.1, mode="batch", training=True)
+```
+
+`mode="row"` drops individual samples independently; `mode="batch"` drops the entire batch with probability `p`.
+
+### DropBlock
+
+Drops contiguous spatial blocks of activations — more aggressive than standard dropout for convolutional feature maps:
+
+```python
+from torchvision.ops import DropBlock2d, DropBlock3d
+import torch
+
+# 2D — for image feature maps
+db2d = DropBlock2d(p=0.1, block_size=7)
+x2d = torch.rand(2, 64, 28, 28)
+out2d = db2d(x2d)
+
+# 3D — for video feature maps
+db3d = DropBlock3d(p=0.1, block_size=5)
+x3d = torch.rand(2, 64, 8, 14, 14)
+out3d = db3d(x3d)
+```
+
+---
+
+## NMS + Box Conversion Example
+
+```python
+import torch
+from torchvision.ops import nms, box_iou, box_convert
+
+boxes = torch.tensor([
+    [100., 50., 300., 250.],
+    [110., 55., 310., 260.],  # overlapping box
+    [400., 100., 600., 350.],
+], dtype=torch.float32)
+scores = torch.tensor([0.9, 0.75, 0.85])
+
+keep = nms(boxes, scores, iou_threshold=0.5)
+print(keep)  # tensor([0, 2]) — indices of kept boxes
+
+# Convert box formats
+xyxy_boxes = box_convert(boxes, in_fmt="xyxy", out_fmt="xywh")
+print(xyxy_boxes)
+# tensor([[100.,  50., 200., 200.],
+#         [110.,  55., 200., 205.],
+#         [400., 100., 200., 250.]])
+```
+
+## RoIAlign Example
+
+```python
+from torchvision.ops import RoIAlign
+import torch
+
+roi_align = RoIAlign(
+    output_size=(7, 7),
+    spatial_scale=1.0 / 16,  # feature map stride
+    sampling_ratio=-1,
+    aligned=True,
+)
+
+feature_map = torch.rand(1, 256, 56, 56)
+rois = torch.tensor([[0., 10., 10., 100., 100.]])  # [batch_idx, x1, y1, x2, y2]
+pooled = roi_align(feature_map, [rois[:, 1:]])  # Tensor[1, 256, 7, 7]
+print(pooled.shape)  # torch.Size([1, 256, 7, 7])
+```
+
+---
+
+## Quick Reference
+
+<CardGroup cols={2}>
+  <Card title="Box Operations" icon="border-all">
+    `nms`, `batched_nms`, `box_iou`, `generalized_box_iou`, `distance_box_iou`, `complete_box_iou`, `box_area`, `box_convert`, `clip_boxes_to_image`, `remove_small_boxes`, `masks_to_boxes`
+  </Card>
+  <Card title="RoI Pooling" icon="table-cells">
+    `RoIAlign`, `RoIPool`, `PSRoIAlign`, `PSRoIPool`, `MultiScaleRoIAlign`
+  </Card>
+  <Card title="Loss Functions" icon="chart-line">
+    `sigmoid_focal_loss`, `generalized_box_iou_loss`, `distance_box_iou_loss`, `complete_box_iou_loss`
+  </Card>
+  <Card title="Layers" icon="layer-group">
+    `DeformConv2d`, `deform_conv2d`, `FeaturePyramidNetwork`, `Conv2dNormActivation`, `Conv3dNormActivation`, `SqueezeExcitation`, `MLP`, `FrozenBatchNorm2d`, `Permute`
+  </Card>
+  <Card title="Regularization" icon="shield">
+    `StochasticDepth`, `stochastic_depth`, `DropBlock2d`, `DropBlock3d`, `drop_block2d`, `drop_block3d`
+  </Card>
+</CardGroup>

@@ -1,0 +1,409 @@
+---
+title: "Object Detection Models: Faster R-CNN, FCOS, SSD, RetinaNet"
+sidebarTitle: "Detection"
+description: "Pre-trained object detection models in TorchVision covering Faster R-CNN, Mask R-CNN, Keypoint R-CNN, FCOS, RetinaNet, SSD, and SSDLite."
+---
+
+TorchVision bundles a full suite of pre-trained object detection models that span a wide range of accuracy–speed trade-offs. Every model follows the same simple contract: pass a `list` of `[C, H, W]` float tensors in the `0–1` range, get back a `list` of prediction dictionaries. All weights were trained on **COCO 2017** (80 foreground classes + 1 background = 91 total indices) and ship with a matching `transforms()` preprocessor so there is nothing to configure manually.
+
+<Note>
+  All detection models expect a **Python list of tensors**, not a single batched tensor. Each tensor can have a different spatial size — the model's internal `GeneralizedRCNNTransform` handles resizing and normalization automatically.
+</Note>
+
+## Input / Output Contract
+
+<Steps>
+  <Step title="Build the model and extract its preprocessor">
+    Every pretrained weights enum exposes a `.transforms()` factory that returns the exact preprocessing pipeline the weights were trained with.
+
+    ```python
+    import torch
+    from torchvision.models.detection import (
+        fasterrcnn_resnet50_fpn_v2,
+        FasterRCNN_ResNet50_FPN_V2_Weights,
+    )
+    from torchvision.io import read_image
+
+    weights = FasterRCNN_ResNet50_FPN_V2_Weights.DEFAULT
+    model = fasterrcnn_resnet50_fpn_v2(weights=weights)
+    model.eval()
+
+    preprocess = weights.transforms()
+    ```
+  </Step>
+
+  <Step title="Preprocess and run inference">
+    Wrap each preprocessed image in a Python list — **never** call `torch.stack`.
+
+    ```python
+    img = read_image("image.jpg")       # Tensor[3, H, W], dtype=uint8
+    batch = [preprocess(img)]           # list of Tensor[3, H', W']
+
+    with torch.no_grad():
+        predictions = model(batch)
+
+    # predictions[0] contains:
+    # 'boxes':  FloatTensor[N, 4]  — XYXY absolute pixel coordinates
+    # 'labels': Int64Tensor[N]     — class indices (1-indexed, 0 = background)
+    # 'scores': Tensor[N]          — confidence in [0, 1]
+    boxes  = predictions[0]["boxes"]
+    labels = predictions[0]["labels"]
+    scores = predictions[0]["scores"]
+
+    # Keep only high-confidence detections
+    keep           = scores > 0.5
+    filtered_boxes = boxes[keep]
+    ```
+  </Step>
+
+  <Step title="Training mode — pass targets alongside images">
+    In `model.train()` the model accepts a second argument: a list of target dictionaries, one per image. It returns a `Dict[str, Tensor]` of losses rather than predictions.
+
+    ```python
+    images = [preprocess(img)]
+
+    targets = [{
+        "boxes":  torch.tensor([[100., 50., 300., 250.]], dtype=torch.float32),
+        "labels": torch.tensor([1], dtype=torch.int64),
+    }]
+
+    model.train()
+    loss_dict  = model(images, targets)
+    # Keys: 'loss_classifier', 'loss_box_reg', 'loss_objectness', 'loss_rpn_box_reg'
+    total_loss = sum(loss for loss in loss_dict.values())
+    total_loss.backward()
+    ```
+
+    <Warning>
+      Boxes must be in `[x1, y1, x2, y2]` (XYXY) absolute pixel format with `0 ≤ x1 < x2 ≤ W` and `0 ≤ y1 < y2 ≤ H`. Labels must be `torch.int64`.
+    </Warning>
+  </Step>
+</Steps>
+
+---
+
+## Faster R-CNN
+
+Faster R-CNN is a two-stage detector that uses a **Region Proposal Network (RPN)** to generate candidate bounding boxes, then refines them through a second classification and regression head. The FPN backbone extracts multi-scale features, making it strong on both large and small objects.
+
+<CardGroup cols={2}>
+  <Card title="fasterrcnn_resnet50_fpn" icon="bullseye">
+    ResNet-50 + FPN backbone. The canonical baseline — good accuracy with reasonable throughput.
+    **COCO box mAP: 37.0** | 41.8M params | 134.4 GFLOPs
+  </Card>
+  <Card title="fasterrcnn_resnet50_fpn_v2" icon="bolt">
+    Improved training recipe with deeper RPN and box heads.
+    **COCO box mAP: 46.7** | 43.7M params | 280.4 GFLOPs
+  </Card>
+  <Card title="fasterrcnn_mobilenet_v3_large_fpn" icon="mobile">
+    MobileNetV3-Large backbone for high-res deployment.
+    **COCO box mAP: 32.8** | 19.4M params | 4.5 GFLOPs
+  </Card>
+  <Card title="fasterrcnn_mobilenet_v3_large_320_fpn" icon="gauge-high">
+    Same backbone, fixed 320×320 input for maximum speed on edge devices.
+    **COCO box mAP: 22.8** | 19.4M params | 0.72 GFLOPs
+  </Card>
+</CardGroup>
+
+```python
+from torchvision.models.detection import (
+    fasterrcnn_resnet50_fpn,        FasterRCNN_ResNet50_FPN_Weights,
+    fasterrcnn_resnet50_fpn_v2,     FasterRCNN_ResNet50_FPN_V2_Weights,
+    fasterrcnn_mobilenet_v3_large_fpn,      FasterRCNN_MobileNet_V3_Large_FPN_Weights,
+    fasterrcnn_mobilenet_v3_large_320_fpn,  FasterRCNN_MobileNet_V3_Large_320_FPN_Weights,
+)
+
+# V1 — faithful to the original paper
+model_v1 = fasterrcnn_resnet50_fpn(
+    weights=FasterRCNN_ResNet50_FPN_Weights.DEFAULT
+)
+
+# V2 — enhanced recipe, higher accuracy
+model_v2 = fasterrcnn_resnet50_fpn_v2(
+    weights=FasterRCNN_ResNet50_FPN_V2_Weights.DEFAULT
+)
+
+# MobileNet — high-resolution mobile variant
+model_mob = fasterrcnn_mobilenet_v3_large_fpn(
+    weights=FasterRCNN_MobileNet_V3_Large_FPN_Weights.DEFAULT
+)
+
+# MobileNet 320 — ultra-fast mobile variant (320 × 320)
+model_320 = fasterrcnn_mobilenet_v3_large_320_fpn(
+    weights=FasterRCNN_MobileNet_V3_Large_320_FPN_Weights.DEFAULT
+)
+```
+
+<Tip>
+  `fasterrcnn_resnet50_fpn_v2` is the recommended default for most production use-cases: its improved training recipe (deeper convolutional RPN/box heads + BatchNorm) gives ~10 mAP points over V1 with only a ~2× compute increase.
+</Tip>
+
+---
+
+## Mask R-CNN
+
+Mask R-CNN extends Faster R-CNN with a parallel **instance segmentation head** that predicts a binary pixel mask for each detected object. The training target dictionary requires an additional `masks` key.
+
+<CardGroup cols={2}>
+  <Card title="maskrcnn_resnet50_fpn" icon="vector-square">
+    ResNet-50 + FPN. Standard recipe.
+    **Box mAP: 37.9 · Mask mAP: 34.6** | 44.4M params
+  </Card>
+  <Card title="maskrcnn_resnet50_fpn_v2" icon="wand-magic-sparkles">
+    Enhanced training recipe. Higher accuracy.
+    **Box mAP: 47.4 · Mask mAP: 41.8** | 46.4M params
+  </Card>
+</CardGroup>
+
+<CodeGroup>
+```python Inference
+from torchvision.models.detection import (
+    maskrcnn_resnet50_fpn,
+    MaskRCNN_ResNet50_FPN_Weights,
+)
+
+weights = MaskRCNN_ResNet50_FPN_Weights.DEFAULT
+model   = maskrcnn_resnet50_fpn(weights=weights)
+model.eval()
+
+preprocess  = weights.transforms()
+batch       = [preprocess(read_image("image.jpg"))]
+
+with torch.no_grad():
+    predictions = model(batch)
+
+# Extra key compared with Faster R-CNN:
+# 'masks': FloatTensor[N, 1, H, W] — soft masks in [0, 1]
+masks      = predictions[0]["masks"]            # [N, 1, H, W]
+hard_masks = masks.squeeze(1) > 0.5            # [N, H, W] bool
+```
+
+```python Training targets
+# Mask R-CNN training targets require a 'masks' key
+targets = [{
+    "boxes":  torch.tensor([[50., 30., 200., 180.]], dtype=torch.float32),
+    "labels": torch.tensor([3], dtype=torch.int64),
+    "masks":  torch.zeros(1, H, W, dtype=torch.uint8),  # UInt8[N, H, W]
+}]
+```
+</CodeGroup>
+
+---
+
+## Keypoint R-CNN
+
+Keypoint R-CNN adds a keypoint prediction head on top of Faster R-CNN. The pretrained weights detect **17 COCO person keypoints** (nose, eyes, ears, shoulders, elbows, wrists, hips, knees, ankles).
+
+| Weight | Box mAP | KP mAP | Params | GFLOPs |
+|--------|---------|--------|--------|--------|
+| `COCO_V1` (DEFAULT) | 54.6 | 65.0 | 59.1M | 137.4 |
+| `COCO_LEGACY` | 50.6 | 61.1 | 59.1M | 133.9 |
+
+```python
+from torchvision.models.detection import (
+    keypointrcnn_resnet50_fpn,
+    KeypointRCNN_ResNet50_FPN_Weights,
+)
+
+weights = KeypointRCNN_ResNet50_FPN_Weights.DEFAULT
+model   = keypointrcnn_resnet50_fpn(weights=weights)
+model.eval()
+
+preprocess  = weights.transforms()
+batch       = [preprocess(read_image("image.jpg"))]
+
+with torch.no_grad():
+    predictions = model(batch)
+
+# Inference output keys:
+# 'boxes':     FloatTensor[N, 4]
+# 'labels':    Int64Tensor[N]
+# 'scores':    Tensor[N]
+# 'keypoints': FloatTensor[N, K, 3]  — [x, y, visibility] per keypoint
+keypoints = predictions[0]["keypoints"]   # [N, 17, 3]
+```
+
+<Note>
+  The third column of `keypoints` is a **visibility flag**: `0` = not labeled, `1` = labeled but occluded, `2` = labeled and visible. Training targets also require a `keypoints` field of shape `[N, K, 3]`.
+</Note>
+
+---
+
+## FCOS
+
+FCOS (Fully Convolutional One-Stage Object Detection) is an **anchor-free** detector. It avoids anchor hyperparameter tuning by predicting bounding box offsets directly from feature map locations, using a centerness branch to suppress low-quality detections.
+
+| Weight | Box mAP | Params | GFLOPs | File size |
+|--------|---------|--------|--------|-----------|
+| `COCO_V1` (DEFAULT) | 39.2 | 32.3M | 128.2 | 123.6 MB |
+
+```python
+from torchvision.models.detection import (
+    fcos_resnet50_fpn,
+    FCOS_ResNet50_FPN_Weights,
+)
+
+weights = FCOS_ResNet50_FPN_Weights.DEFAULT
+model   = fcos_resnet50_fpn(weights=weights)
+model.eval()
+
+preprocess  = weights.transforms()
+batch       = [preprocess(read_image("image.jpg"))]
+
+with torch.no_grad():
+    predictions = model(batch)
+
+# Same output schema as Faster R-CNN:
+# 'boxes', 'labels', 'scores'
+print(predictions[0]["boxes"].shape)    # [N, 4]
+```
+
+<Tip>
+  FCOS is a good drop-in replacement for Faster R-CNN when you want to avoid anchor grid tuning. It achieves competitive mAP (~39.2) at lower compute (128 GFLOPs vs 280 for Faster R-CNN V2) while sharing the same inference API.
+</Tip>
+
+---
+
+## RetinaNet
+
+RetinaNet is a one-stage detector that introduces **Focal Loss** to address the class imbalance problem between foreground and background anchors during training. It uses an FPN backbone with two subnetworks (classification and box regression) that share weights across all pyramid levels.
+
+<CardGroup cols={2}>
+  <Card title="retinanet_resnet50_fpn" icon="crosshairs">
+    Standard recipe from the original paper.
+    **COCO box mAP: 36.4** | 34.0M params | 151.5 GFLOPs
+  </Card>
+  <Card title="retinanet_resnet50_fpn_v2" icon="arrow-trend-up">
+    Enhanced training recipe with BatchNorm heads.
+    **COCO box mAP: 41.5** | 38.2M params | 152.2 GFLOPs
+  </Card>
+</CardGroup>
+
+```python
+from torchvision.models.detection import (
+    retinanet_resnet50_fpn,    RetinaNet_ResNet50_FPN_Weights,
+    retinanet_resnet50_fpn_v2, RetinaNet_ResNet50_FPN_V2_Weights,
+)
+
+# V1
+model_v1 = retinanet_resnet50_fpn(
+    weights=RetinaNet_ResNet50_FPN_Weights.DEFAULT
+)
+
+# V2 — improved BatchNorm heads
+model_v2 = retinanet_resnet50_fpn_v2(
+    weights=RetinaNet_ResNet50_FPN_V2_Weights.DEFAULT
+)
+model_v2.eval()
+
+preprocess = RetinaNet_ResNet50_FPN_V2_Weights.DEFAULT.transforms()
+batch = [preprocess(read_image("image.jpg"))]
+
+with torch.no_grad():
+    predictions = model_v2(batch)
+```
+
+---
+
+## SSD / SSDLite
+
+SSD (Single Shot MultiBox Detector) predicts boxes at multiple fixed aspect-ratio anchors across several feature maps in a single forward pass. SSDLite replaces standard convolutions with **depthwise-separable convolutions** and pairs with a MobileNetV3 backbone for deployment on mobile hardware.
+
+<CardGroup cols={2}>
+  <Card title="ssd300_vgg16" icon="cube">
+    Classic SSD with VGG-16 backbone. Fixed 300×300 input.
+    **COCO box mAP: 25.1** | 35.6M params | 34.9 GFLOPs
+  </Card>
+  <Card title="ssdlite320_mobilenet_v3_large" icon="microchip">
+    SSDLite with MobileNetV3-Large. Fixed 320×320 input.
+    **COCO box mAP: 21.3** | 3.4M params | 0.58 GFLOPs
+  </Card>
+</CardGroup>
+
+```python
+from torchvision.models.detection import (
+    ssd300_vgg16,
+    SSD300_VGG16_Weights,
+    ssdlite320_mobilenet_v3_large,
+    SSDLite320_MobileNet_V3_Large_Weights,
+)
+
+# SSD300 with VGG-16 backbone
+weights_ssd  = SSD300_VGG16_Weights.DEFAULT
+model_ssd    = ssd300_vgg16(weights=weights_ssd)
+model_ssd.eval()
+
+# SSDLite with MobileNetV3 — ideal for on-device inference
+weights_lite = SSDLite320_MobileNet_V3_Large_Weights.DEFAULT
+model_lite   = ssdlite320_mobilenet_v3_large(weights=weights_lite)
+model_lite.eval()
+
+preprocess = weights_lite.transforms()
+batch      = [preprocess(read_image("image.jpg"))]
+
+with torch.no_grad():
+    predictions = model_lite(batch)
+
+print(predictions[0]["boxes"].shape)    # FloatTensor[N, 4]
+print(predictions[0]["scores"].shape)   # Tensor[N]
+```
+
+<Warning>
+  SSD and SSDLite internally resize all images to a **fixed spatial size** (300×300 or 320×320 respectively) regardless of the input dimensions. The output boxes are rescaled back to the original image coordinates before being returned.
+</Warning>
+
+---
+
+## Choosing a Model
+
+| Model | COCO mAP | GFLOPs | Params | Best for |
+|-------|----------|--------|--------|----------|
+| `fasterrcnn_resnet50_fpn_v2` | **46.7** | 280 | 43.7M | Best accuracy, server inference |
+| `retinanet_resnet50_fpn_v2` | 41.5 | 152 | 38.2M | Single-stage accuracy |
+| `fcos_resnet50_fpn` | 39.2 | 128 | 32.3M | Anchor-free, no tuning needed |
+| `fasterrcnn_resnet50_fpn` | 37.0 | 134 | 41.8M | Faster R-CNN baseline |
+| `retinanet_resnet50_fpn` | 36.4 | 152 | 34.0M | RetinaNet baseline |
+| `fasterrcnn_mobilenet_v3_large_fpn` | 32.8 | 4.5 | 19.4M | Mobile, high-res |
+| `ssd300_vgg16` | 25.1 | 35 | 35.6M | Legacy SSD baseline |
+| `fasterrcnn_mobilenet_v3_large_320_fpn` | 22.8 | 0.72 | 19.4M | Edge / real-time |
+| `ssdlite320_mobilenet_v3_large` | 21.3 | 0.58 | 3.4M | **Smallest / fastest** |
+
+---
+
+## Custom Backbone Example
+
+All detection models accept any backbone with an `out_channels` attribute. The following snippet shows how to attach a custom MobileNetV2 backbone to `FasterRCNN`:
+
+```python
+import torchvision
+from torchvision.models.detection import FasterRCNN
+from torchvision.models.detection.rpn import AnchorGenerator
+from torchvision.models import MobileNet_V2_Weights
+
+# Use MobileNetV2 features as the backbone
+backbone = torchvision.models.mobilenet_v2(
+    weights=MobileNet_V2_Weights.DEFAULT
+).features
+backbone.out_channels = 1280  # required attribute
+
+anchor_generator = AnchorGenerator(
+    sizes=((32, 64, 128, 256, 512),),
+    aspect_ratios=((0.5, 1.0, 2.0),),
+)
+
+roi_pooler = torchvision.ops.MultiScaleRoIAlign(
+    featmap_names=["0"],
+    output_size=7,
+    sampling_ratio=2,
+)
+
+model = FasterRCNN(
+    backbone,
+    num_classes=2,   # background + 1 foreground class
+    rpn_anchor_generator=anchor_generator,
+    box_roi_pool=roi_pooler,
+)
+model.eval()
+x = [torch.rand(3, 300, 400), torch.rand(3, 500, 400)]
+predictions = model(x)
+```

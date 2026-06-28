@@ -1,0 +1,199 @@
+---
+title: "TorchVision Transforms: Image Augmentation Pipeline"
+sidebarTitle: "Overview"
+description: "Learn how TorchVision's transforms v2 API builds composable augmentation pipelines for images, bounding boxes, masks, keypoints, and videos."
+---
+
+TorchVision transforms are composable building blocks for data augmentation and preprocessing. They live in `torchvision.transforms.v2` and work on a variety of input types — raw tensors, PIL images, segmentation masks, bounding boxes, keypoints, and videos — all within a single, unified pipeline. Whether you are training an image classifier, an object detector, or a video model, transforms let you define your preprocessing once and apply it consistently across every modality in your sample.
+
+## V1 vs V2
+
+TorchVision ships two generations of transforms. The legacy `torchvision.transforms` (v1) only operates on single images. The newer `torchvision.transforms.v2` namespace — released in TorchVision 0.15 — extends every transform to handle **all vision modalities simultaneously**. New features and performance improvements are added exclusively to v2, so it is the recommended choice for all new projects.
+
+<CardGroup cols={2}>
+  <Card title="transforms (v1)" icon="image">
+    - Image-only pipeline
+    - Slower PIL-based defaults
+    - No bounding box or mask support
+    - `ToTensor()` for dtype conversion
+  </Card>
+  <Card title="transforms.v2 (recommended)" icon="rocket">
+    - Images, boxes, masks, keypoints, videos
+    - Faster tensor-native backend
+    - Arbitrary input structures (dicts, lists)
+    - `ToDtype()` replaces `ToTensor()`
+  </Card>
+</CardGroup>
+
+<Tip>
+  Migrating from v1 is usually a single-line change: replace
+  `import torchvision.transforms as T` with
+  `import torchvision.transforms.v2 as T`.
+</Tip>
+
+## A Basic Pipeline
+
+The example below shows a typical image-classification pipeline using the v2 API. `Compose` chains transforms sequentially, passing the same input through each step in order.
+
+```python
+import torch
+import torchvision.transforms.v2 as T
+
+transform = T.Compose([
+    T.RandomResizedCrop(size=(224, 224), antialias=True),
+    T.RandomHorizontalFlip(p=0.5),
+    T.ToDtype(torch.float32, scale=True),
+    T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+])
+
+# Works on a plain uint8 tensor image
+img = torch.randint(0, 256, size=(3, 256, 256), dtype=torch.uint8)
+img_transformed = transform(img)
+```
+
+`ToDtype(torch.float32, scale=True)` converts the image from `uint8` `[0, 255]` to `float32` `[0.0, 1.0]` in one step, replacing the deprecated `ToTensor()` from v1.
+
+## TVTensors
+
+TVTensors are typed `torch.Tensor` subclasses that carry the metadata transforms need to correctly augment non-image data. When a transform such as `RandomHorizontalFlip` receives a `BoundingBoxes` tensor, it knows to mirror the coordinates rather than the pixel values. All TVTensor types are importable from `torchvision.tv_tensors`.
+
+<CardGroup cols={2}>
+  <Card title="Image" icon="image">
+    Shape `[..., C, H, W]`. Interchangeable with a plain tensor inside transforms, but explicitly marks pixel data.
+  </Card>
+  <Card title="BoundingBoxes" icon="vector-square">
+    Shape `[N, 4]`. Requires `format` (`XYXY`, `XYWH`, or `CXCYWH`) and `canvas_size` (H, W).
+  </Card>
+  <Card title="Mask" icon="draw-polygon">
+    Shape `[..., H, W]`. Used for segmentation masks and binary detection masks.
+  </Card>
+  <Card title="KeyPoints" icon="crosshairs">
+    Shape `[..., 2]` (x, y per point). Requires `canvas_size`. Supports polygons, skeletons, and polylines.
+  </Card>
+  <Card title="Video" icon="film">
+    Shape `[T, C, H, W]` or `[..., T, C, H, W]`. Spatial transforms are applied identically across all frames.
+  </Card>
+</CardGroup>
+
+### Wrapping tensors
+
+You can wrap any existing tensor into a TVTensor at sample-load time:
+
+```python
+import torch
+from torchvision.tv_tensors import Image, BoundingBoxes, BoundingBoxFormat, Mask
+
+image = Image(torch.randint(0, 256, (3, 480, 640), dtype=torch.uint8))
+
+boxes = BoundingBoxes(
+    [[10, 20, 100, 150], [200, 50, 400, 300]],
+    format=BoundingBoxFormat.XYXY,
+    canvas_size=(480, 640),
+)
+
+mask = Mask(torch.zeros(480, 640, dtype=torch.uint8))
+```
+
+Once wrapped, any v2 transform automatically dispatches the correct transformation logic for each type.
+
+## Multi-Modality in One Pass
+
+One of the headline features of v2 is that a single `transform(...)` call handles all modalities of a sample simultaneously, keeping spatial augmentations — crops, flips, rotations — perfectly consistent:
+
+```python
+import torch
+import torchvision.transforms.v2 as T
+from torchvision.tv_tensors import BoundingBoxes, BoundingBoxFormat, Mask
+
+transform = T.Compose([
+    T.RandomResizedCrop(size=(224, 224), antialias=True),
+    T.RandomHorizontalFlip(p=0.5),
+])
+
+img   = torch.randint(0, 256, size=(3, 480, 640), dtype=torch.uint8)
+boxes = BoundingBoxes(
+    [[10, 20, 100, 150]],
+    format=BoundingBoxFormat.XYXY,
+    canvas_size=(480, 640),
+)
+mask  = Mask(torch.zeros(480, 640, dtype=torch.uint8))
+
+# All three are transformed with identical spatial parameters
+img_t, boxes_t, mask_t = transform(img, boxes, mask)
+```
+
+Transforms also accept **arbitrary input structures** such as dicts:
+
+```python
+sample = {"image": img, "boxes": boxes, "mask": mask}
+transformed = transform(sample)
+```
+
+## Class-Based vs. Functional API
+
+TorchVision provides two interfaces for applying transforms.
+
+**Class-based transforms** (e.g., `T.RandomHorizontalFlip(p=0.5)`) are stateful objects that can be composed with `Compose` or `torch.nn.Sequential`, serialized, and used in production pipelines. Parameters are sampled at call time via `make_params`.
+
+**Functional transforms** in `torchvision.transforms.v2.functional` are pure, stateless functions that give you direct, low-level control. They are useful when you want to apply the same pre-sampled parameters to multiple tensors, or when building custom transforms:
+
+```python
+import torchvision.transforms.v2.functional as F
+
+# Deterministic: you control all parameters explicitly
+flipped_img = F.horizontal_flip(img)
+cropped_img = F.center_crop(img, output_size=[224, 224])
+normalized  = F.normalize(img.float() / 255.0,
+                          mean=[0.485, 0.456, 0.406],
+                          std=[0.229, 0.224, 0.225])
+```
+
+<Note>
+  Functional transforms skip the TVTensor dispatch logic — they operate on the
+  underlying tensor data directly. Use the class-based API when you need
+  multi-modality consistency.
+</Note>
+
+## Transform Categories
+
+<CardGroup cols={2}>
+  <Card title="Geometry" icon="arrows-left-right">
+    Spatial transforms that alter image dimensions or layout: `Resize`, `RandomCrop`, `RandomResizedCrop`, `RandomHorizontalFlip`, `RandomRotation`, `RandomAffine`, `ElasticTransform`, `Pad`, `CenterCrop`, `FiveCrop`, `TenCrop`.
+  </Card>
+  <Card title="Color / Photometric" icon="palette">
+    Pixel-value transforms that do not change spatial layout: `ColorJitter`, `Grayscale`, `RandomGrayscale`, `RandomInvert`, `RandomPosterize`, `RandomSolarize`, `RandomAutocontrast`, `RandomEqualize`, `RandomAdjustSharpness`, `RandomPhotometricDistort`.
+  </Card>
+  <Card title="Augmentation" icon="wand-magic-sparkles">
+    Advanced learned and stochastic augmentation strategies: `AutoAugment`, `RandAugment`, `TrivialAugmentWide`, `AugMix`, `CutMix`, `MixUp`, `RandomErasing`, `JPEG`.
+  </Card>
+  <Card title="Type Conversion" icon="arrow-right-arrow-left">
+    Transforms that change the tensor type or encoding without modifying spatial content: `ToDtype`, `ToImage`, `PILToTensor`, `ToPILImage`, `ToPureTensor`.
+  </Card>
+  <Card title="Composition" icon="layer-group">
+    Meta-transforms for combining others: `Compose`, `RandomApply`, `RandomChoice`, `RandomOrder`.
+  </Card>
+</CardGroup>
+
+## Composing with `torch.nn.Sequential`
+
+For TorchScript compatibility, replace `Compose` with `torch.nn.Sequential`. Only scriptable transforms (those that operate purely on `torch.Tensor`) are supported in this mode:
+
+```python
+import torch
+import torchvision.transforms.v2 as T
+
+scripted_transform = torch.nn.Sequential(
+    T.RandomResizedCrop(224, antialias=True),
+    T.RandomHorizontalFlip(),
+    T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+)
+
+# Export for deployment
+scripted = torch.jit.script(scripted_transform)
+scripted.save("transform.pt")
+```
+
+<Warning>
+  `Compose` does not support TorchScript. Use `torch.nn.Sequential` when you
+  need to export your preprocessing pipeline with `torch.jit.script`.
+</Warning>

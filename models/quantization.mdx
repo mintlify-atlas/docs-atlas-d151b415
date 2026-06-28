@@ -1,0 +1,251 @@
+---
+title: "Quantized Classification Models for Efficient Inference"
+sidebarTitle: "Quantization"
+description: "INT8 quantized classification models in torchvision.models.quantization for fast, memory-efficient CPU inference on x86 and ARM devices."
+---
+
+`torchvision.models.quantization` provides INT8-quantized variants of several popular classification models. Quantized models represent weights and activations as 8-bit integers instead of 32-bit floats, which results in models that are typically **up to 4× smaller** and run **2–3× faster** on CPU compared to their float counterparts — with only a small accuracy trade-off. All quantized models are optimised for CPU inference and are not currently supported on GPU.
+
+<Tip>
+  Quantized models can be 4× smaller and 2–3× faster than their float counterparts on CPU, making them ideal for edge deployments, latency-sensitive APIs, and environments where GPU is unavailable.
+</Tip>
+
+## Available quantized models
+
+The following models have quantized variants. Each builder function accepts the same `weights` and `progress` arguments as its full-precision counterpart, plus a `quantize` boolean flag.
+
+| Builder | Quantized weights class | Float weights class | Training method |
+|---|---|---|---|
+| `quantization.googlenet` | `GoogLeNet_QuantizedWeights` | `GoogLeNet_Weights` | PTQ |
+| `quantization.inception_v3` | `Inception_V3_QuantizedWeights` | `Inception_V3_Weights` | PTQ |
+| `quantization.mobilenet_v2` | `MobileNet_V2_QuantizedWeights` | `MobileNet_V2_Weights` | QAT |
+| `quantization.mobilenet_v3_large` | `MobileNet_V3_Large_QuantizedWeights` | `MobileNet_V3_Large_Weights` | QAT |
+| `quantization.resnet18` | `ResNet18_QuantizedWeights` | `ResNet18_Weights` | PTQ |
+| `quantization.resnet50` | `ResNet50_QuantizedWeights` | `ResNet50_Weights` | PTQ |
+| `quantization.resnext101_32x8d` | `ResNeXt101_32X8D_QuantizedWeights` | `ResNeXt101_32X8D_Weights` | PTQ |
+| `quantization.resnext101_64x4d` | `ResNeXt101_64X4D_QuantizedWeights` | `ResNeXt101_64X4D_Weights` | PTQ |
+| `quantization.shufflenet_v2_x0_5` | `ShuffleNet_V2_X0_5_QuantizedWeights` | `ShuffleNet_V2_X0_5_Weights` | PTQ |
+| `quantization.shufflenet_v2_x1_0` | `ShuffleNet_V2_X1_0_QuantizedWeights` | `ShuffleNet_V2_X1_0_Weights` | PTQ |
+| `quantization.shufflenet_v2_x1_5` | `ShuffleNet_V2_X1_5_QuantizedWeights` | `ShuffleNet_V2_X1_5_Weights` | PTQ |
+| `quantization.shufflenet_v2_x2_0` | `ShuffleNet_V2_X2_0_QuantizedWeights` | `ShuffleNet_V2_X2_0_Weights` | PTQ |
+
+<Note>
+  **PTQ** = Post-Training Quantization (calibration-based). **QAT** = Quantization-Aware Training (simulated quantization during training). MobileNetV2 and MobileNetV3 Large use QAT weights, which generally yield better accuracy than PTQ at the same bit-width.
+</Note>
+
+---
+
+## Loading a quantized model
+
+Pass `quantize=True` together with a quantized weights object to get a ready-to-use INT8 model. The weights object also carries the matched preprocessing transforms.
+
+```python
+from torchvision.models.quantization import resnet50, ResNet50_QuantizedWeights
+
+weights = ResNet50_QuantizedWeights.DEFAULT   # best available quantized weights
+model   = resnet50(weights=weights, quantize=True)
+model.eval()
+
+# Retrieve the preprocessing pipeline that matches the training setup
+preprocess = weights.transforms()
+```
+
+<Note>
+  Quantized models must be in **eval mode** for inference. Quantization operators do not support training mode.
+</Note>
+
+### The `quantize` parameter
+
+Every builder in `torchvision.models.quantization` accepts a `quantize` keyword argument:
+
+- **`quantize=True`** — returns a fully quantized INT8 model ready for CPU inference. Weights are stored as 8-bit integers and linear/convolutional operations use integer arithmetic.
+- **`quantize=False`** (default) — returns the float model built from a quantization-friendly architecture (fused modules, `FloatFunctional` for addition/concatenation). This is useful when you want the float backbone before applying your own quantization pipeline.
+
+```python
+from torchvision.models.quantization import mobilenet_v2
+from torchvision.models import MobileNet_V2_Weights
+
+# Quantized INT8 model (QAT weights, QNNPACK backend)
+model_int8 = mobilenet_v2(
+    weights=None,
+    quantize=True,
+)
+
+# Float model with quantization-compatible architecture
+model_float = mobilenet_v2(
+    weights=MobileNet_V2_Weights.IMAGENET1K_V1,
+    quantize=False,
+)
+```
+
+---
+
+## End-to-end inference example
+
+```python
+import torch
+from PIL import Image
+from torchvision.models.quantization import resnet50, ResNet50_QuantizedWeights
+
+weights = ResNet50_QuantizedWeights.DEFAULT
+model   = resnet50(weights=weights, quantize=True)
+model.eval()
+
+preprocess = weights.transforms()
+
+img   = Image.open("dog.jpg").convert("RGB")
+batch = preprocess(img).unsqueeze(0)           # [1, 3, 224, 224]
+
+with torch.inference_mode():
+    logits = model(batch)                      # [1, 1000]
+
+class_id   = logits.argmax(dim=1).item()
+class_name = weights.meta["categories"][class_id]
+print(class_name)
+```
+
+---
+
+## Backends: FBGEMM vs QNNPACK
+
+TorchVision quantized models target one of two PyTorch quantization backends, depending on the model and its pretrained weights:
+
+<CardGroup cols={2}>
+  <Card title="FBGEMM (x86)" icon="computer">
+    Used by ResNet, ResNeXt, GoogLeNet, Inception V3, and ShuffleNetV2 weights. Optimised for x86 CPUs with AVX2/AVX-512 support. Best choice for server and desktop inference.
+  </Card>
+  <Card title="QNNPACK (ARM)" icon="mobile">
+    Used by MobileNetV2 and MobileNetV3 Large weights. Optimised for ARM CPUs. Best choice for mobile and embedded devices.
+  </Card>
+</CardGroup>
+
+The backend is encoded in the weights metadata and applied automatically when you pass `quantize=True`. You can also set it explicitly:
+
+```python
+import torch
+
+# Set the global backend before calling quantize
+torch.backends.quantized.engine = "fbgemm"   # or "qnnpack"
+```
+
+---
+
+## Post-Training Static Quantization (PTSQ)
+
+If the pretrained quantized weights don't suit your deployment target (e.g., you want a custom calibration dataset), you can run your own Post-Training Static Quantization using the quantization-friendly float models as a starting point.
+
+<Steps>
+  <Step title="Load the float model with quantization-aware architecture">
+    Use `quantize=False` to get the `QuantizableMobileNetV2` (or equivalent) with `FloatFunctional` modules substituted in place of plain tensor operations.
+
+    ```python
+    from torchvision.models.quantization import mobilenet_v2
+    import torch
+
+    model = mobilenet_v2(weights=None, quantize=False)
+    model.eval()
+    ```
+  </Step>
+
+  <Step title="Fuse Conv + BN + ReLU layers">
+    Fusing adjacent Conv → BatchNorm → ReLU into a single operation reduces memory traffic and is required for accurate static quantization.
+
+    ```python
+    # is_qat=False selects PTQ fusion patterns
+    model.fuse_model(is_qat=False)
+    ```
+  </Step>
+
+  <Step title="Set quantization configuration">
+    Choose a `qconfig` that matches your target backend.
+
+    ```python
+    # 'x86' for FBGEMM / AVX2 servers; use 'qnnpack' for ARM devices
+    model.qconfig = torch.ao.quantization.get_default_qconfig("x86")
+    torch.ao.quantization.prepare(model, inplace=True)
+    ```
+  </Step>
+
+  <Step title="Calibrate with representative data">
+    Run a few hundred representative batches through the model. The observer modules inserted by `prepare` collect activation statistics.
+
+    ```python
+    with torch.no_grad():
+        for images, _ in calibration_dataloader:
+            model(images)
+    ```
+  </Step>
+
+  <Step title="Convert to INT8">
+    Replace float operations with their quantized counterparts using the collected statistics.
+
+    ```python
+    torch.ao.quantization.convert(model, inplace=True)
+    # model is now a quantized INT8 model
+    ```
+  </Step>
+</Steps>
+
+### Full PTSQ example
+
+```python
+from torchvision.models.quantization import mobilenet_v2
+import torch
+
+# Step 1 — float model with quantization-aware modules
+model = mobilenet_v2(weights=None, quantize=False)
+model.eval()
+
+# Step 2 — fuse conv+bn+relu layers
+model.fuse_model(is_qat=False)
+
+# Step 3 — attach quantization observers
+model.qconfig = torch.ao.quantization.get_default_qconfig("x86")
+torch.ao.quantization.prepare(model, inplace=True)
+
+# Step 4 — calibrate
+with torch.no_grad():
+    for images, _ in calibration_dataloader:
+        model(images)
+
+# Step 5 — convert to INT8
+torch.ao.quantization.convert(model, inplace=True)
+
+# Verify — all Conv/Linear layers are now quantized
+print(type(model.features[1].conv[0][0]))  # <class 'torch.nn.quantized.Conv2d'>
+```
+
+---
+
+## Quantization-Aware Training (QAT)
+
+QAT simulates INT8 quantization effects during the forward pass while keeping float32 gradients for weight updates. This generally outperforms PTSQ, especially for smaller models. The MobileNetV2 and MobileNetV3 Large pretrained quantized weights in TorchVision were produced with QAT.
+
+```python
+from torchvision.models.quantization import mobilenet_v2
+import torch
+
+# Start from a pretrained float model
+model = mobilenet_v2(weights=None, quantize=False)
+model.train()
+
+# Fuse layers in QAT mode
+model.fuse_model(is_qat=True)
+
+# Attach QAT-aware fake quantization observers
+model.qconfig = torch.ao.quantization.get_default_qat_qconfig("x86")
+torch.ao.quantization.prepare_qat(model, inplace=True)
+
+# Fine-tune with your training loop ...
+# optimizer = torch.optim.SGD(model.parameters(), lr=1e-4)
+# for epoch in range(num_epochs):
+#     train_one_epoch(model, optimizer, train_dataloader)
+
+# Convert to INT8 after fine-tuning
+model.eval()
+torch.ao.quantization.convert(model, inplace=True)
+```
+
+<Warning>
+  Quantized models only support **CPU inference**. Calling `.cuda()` or running on a GPU will raise an error. Make sure all input tensors are on CPU (`tensor.cpu()`) before inference.
+</Warning>

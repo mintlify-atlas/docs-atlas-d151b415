@@ -1,20 +1,92 @@
 ---
-title: "Introduction"
-description: "Welcome to your project"
+title: "TorchVision: PyTorch's Computer Vision Library"
+sidebarTitle: "Home"
+description: "TorchVision provides datasets, model architectures, transforms, and vision ops for computer vision research and production with PyTorch."
 ---
 
-Write a short description of your product here. What it does, who it's for, and what they can accomplish with it.
+TorchVision is PyTorch's official computer vision library. It ships over 60 pre-trained model architectures, 50+ benchmark datasets, a composable transforms pipeline, and low-level vision operators — everything you need to build, train, and deploy computer vision models.
 
-<Tip>
-  Ready to make this your own? Start by editing this page. Update your `docs.json` file to customize your site. Then fill out the [Quickstart](/quickstart) page.
-</Tip>
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Install TorchVision alongside PyTorch for your platform and CUDA version.
+  </Card>
+  <Card title="Quickstart" icon="bolt" href="/quickstart">
+    Run inference with a pre-trained model in under 10 lines of code.
+  </Card>
+  <Card title="Models" icon="brain" href="/models/overview">
+    Browse 60+ architectures for classification, detection, segmentation, and more.
+  </Card>
+  <Card title="Transforms" icon="wand-magic-sparkles" href="/transforms/overview">
+    Build augmentation pipelines for images, bounding boxes, masks, and keypoints.
+  </Card>
+  <Card title="Datasets" icon="database" href="/datasets/overview">
+    Load 50+ standard benchmarks with a single line of code.
+  </Card>
+  <Card title="Ops & Utilities" icon="gear" href="/ops/overview">
+    NMS, RoI Align, Feature Pyramid Networks, and visualization helpers.
+  </Card>
+</CardGroup>
 
-<Card title="Quickstart" icon="rocket" href="/quickstart">
-  This card links to the quickstart page in your project.
-</Card>
-<Card title="Components" icon="puzzle-piece" href="https://mintlify.com/docs/components">
-  Add cards, callouts, steps, tabs, and more to design and structure your pages.
-</Card>
-<Card title="Settings" icon="gear" href="https://mintlify.com/docs/organize/settings">
-  Set your site name, branding, and navigation in the `docs.json` file.
-</Card>
+## What's in TorchVision
+
+TorchVision is organized into several focused modules:
+
+<CardGroup cols={2}>
+  <Card title="torchvision.models" icon="cube" href="/models/overview">
+    Pre-trained ResNet, EfficientNet, ViT, Faster R-CNN, DeepLabV3, RAFT, and more. Load weights and their matching preprocessing transforms in one call.
+  </Card>
+  <Card title="torchvision.transforms v2" icon="shuffle" href="/transforms/v2-guide">
+    Type-safe transforms that work on images, segmentation masks, bounding boxes, keypoints, and videos — all in the same pipeline.
+  </Card>
+  <Card title="torchvision.datasets" icon="folder-open" href="/datasets/overview">
+    Ready-to-use wrappers for CIFAR, ImageNet, COCO, VOC, Cityscapes, Kinetics, and dozens more. Compatible with `torch.utils.data.DataLoader`.
+  </Card>
+  <Card title="torchvision.ops" icon="microchip" href="/ops/overview">
+    Hardware-accelerated vision primitives: NMS, RoI Align, Deformable Conv, FPN, focal loss, and stochastic depth.
+  </Card>
+  <Card title="torchvision.io" icon="file-image" href="/io/image-video">
+    Fast image and video I/O supporting JPEG, PNG, AVIF, HEIC, WebP, GIF, and video formats via PyAV.
+  </Card>
+  <Card title="torchvision.utils" icon="palette" href="/utilities/visualization">
+    Visualize predictions: draw bounding boxes, segmentation masks, keypoints, and optical flow on images.
+  </Card>
+</CardGroup>
+
+## Get started in 3 steps
+
+<Steps>
+  <Step title="Install TorchVision">
+    Install with pip alongside a matching version of PyTorch:
+    ```bash
+    pip install torch torchvision
+    ```
+  </Step>
+  <Step title="Load a pre-trained model">
+    Use the Weights API to get a model and its recommended preprocessing transforms:
+    ```python
+    from torchvision.models import resnet50, ResNet50_Weights
+
+    weights = ResNet50_Weights.DEFAULT
+    model = resnet50(weights=weights)
+    model.eval()
+    preprocess = weights.transforms()
+    ```
+  </Step>
+  <Step title="Run inference">
+    Apply the transforms and pass your image through the model:
+    ```python
+    from torchvision.io import read_image
+
+    img = read_image("image.jpg")
+    batch = preprocess(img).unsqueeze(0)
+    prediction = model(batch).squeeze(0).softmax(0)
+    class_id = prediction.argmax().item()
+    label = weights.meta["categories"][class_id]
+    print(f"Predicted: {label} ({prediction[class_id]:.1%})")
+    ```
+  </Step>
+</Steps>
+
+<Note>
+  TorchVision versions are tied to specific PyTorch releases. Check the [installation guide](/installation) for the compatibility matrix before upgrading.
+</Note>

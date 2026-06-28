@@ -1,0 +1,359 @@
+---
+title: "Detection and Segmentation Datasets in TorchVision"
+sidebarTitle: "Detection & Segmentation"
+description: "Reference for TorchVision's detection and segmentation datasets — COCO, Pascal VOC, Cityscapes, Kitti, WIDERFace, SBDataset, LFW, and more."
+---
+
+TorchVision includes datasets for object detection, instance segmentation, semantic segmentation, image captioning, and face detection. Each dataset returns an `(image, target)` tuple where `target` carries the task-specific annotation structure — bounding boxes, segmentation masks, captions, or keypoints — exactly as produced by the original dataset authors.
+
+<Tip>
+  Wrap any detection or segmentation dataset with `wrap_dataset_for_transforms_v2` to make targets compatible with `torchvision.transforms.v2`. The wrapper automatically converts bounding boxes to `tv_tensors.BoundingBoxes` and masks to `tv_tensors.Mask`, so coordinate-aware augmentations work correctly.
+
+  ```python
+  from torchvision.datasets import CocoDetection, wrap_dataset_for_transforms_v2
+  dataset = wrap_dataset_for_transforms_v2(CocoDetection(...))
+  ```
+</Tip>
+
+---
+
+## COCO
+
+### CocoDetection
+
+The MS COCO Detection / Segmentation benchmark. Requires `pycocotools` (`pip install pycocotools`).
+
+```python
+from torchvision.datasets import CocoDetection
+
+CocoDetection(
+    root: str | Path,     # directory containing the JPEG images
+    annFile: str,         # path to the JSON annotation file
+    transform=None,
+    target_transform=None,
+    transforms=None,
+)
+```
+
+**`__getitem__` returns** `(PIL.Image, list[dict])` where each dict is a raw COCO annotation record:
+
+| Key | Type | Description |
+|---|---|---|
+| `id` | `int` | Unique annotation ID |
+| `image_id` | `int` | Corresponding image ID |
+| `category_id` | `int` | Category index |
+| `segmentation` | `list` | RLE or polygon masks |
+| `bbox` | `list[float]` | `[x, y, width, height]` in pixels |
+| `area` | `float` | Bounding-box area |
+| `iscrowd` | `int` | 0 = individual instance, 1 = crowd region |
+
+```python
+from torchvision.datasets import CocoDetection
+
+dataset = CocoDetection(
+    root="/path/to/coco/images",
+    annFile="/path/to/coco/annotations/instances_train2017.json",
+    transform=transform,
+)
+
+image, target = dataset[0]
+# image:  PIL.Image (H × W × 3)
+# target: list of annotation dicts
+#   target[0].keys() → ['id', 'image_id', 'category_id',
+#                        'segmentation', 'bbox', 'area', 'iscrowd']
+```
+
+---
+
+### CocoCaptions
+
+Image captioning split of MS COCO. Shares the same constructor as `CocoDetection`.
+
+```python
+from torchvision.datasets import CocoCaptions
+
+CocoCaptions(
+    root: str | Path,
+    annFile: str,
+    transform=None,
+    target_transform=None,
+    transforms=None,
+)
+```
+
+**`__getitem__` returns** `(PIL.Image, list[str])` — a PIL image and a list of caption strings for that image.
+
+```python
+from torchvision.datasets import CocoCaptions
+
+cap = CocoCaptions(
+    root="/path/to/coco/images",
+    annFile="/path/to/coco/annotations/captions_train2017.json",
+)
+
+img, captions = cap[0]
+print(captions)
+# ['A plane emitting smoke stream flying over a mountain.',
+#  'A plane darts across a bright blue sky behind a mountain ...', ...]
+```
+
+---
+
+## Pascal VOC
+
+Both VOC classes share the same base constructor. Supports dataset years **2007 through 2012**.
+
+### VOCDetection
+
+```python
+from torchvision.datasets import VOCDetection
+
+VOCDetection(
+    root: str | Path,
+    year: str = "2012",           # "2007" | "2008" | ... | "2012"
+    image_set: str = "train",     # "train" | "trainval" | "val" | "test" (2007 only)
+    download: bool = False,
+    transform=None,
+    target_transform=None,
+    transforms=None,
+)
+```
+
+**`__getitem__` returns** `(PIL.Image, dict)` where the dict is a parsed XML annotation tree. The top-level key is `"annotation"`, containing:
+- `"folder"`, `"filename"`, `"size"` (width, height, depth)
+- `"object"` — a list of dicts, each with `"name"`, `"pose"`, `"truncated"`, `"difficult"`, and `"bndbox"` (`xmin`, `ymin`, `xmax`, `ymax`)
+
+```python
+from torchvision.datasets import VOCDetection
+
+dataset = VOCDetection(
+    root="./data",
+    year="2012",
+    image_set="train",
+    download=True,
+)
+
+image, target = dataset[0]
+for obj in target["annotation"]["object"]:
+    print(obj["name"], obj["bndbox"])
+# "cat" {'xmin': '123', 'ymin': '45', 'xmax': '320', 'ymax': '280'}
+```
+
+---
+
+### VOCSegmentation
+
+```python
+from torchvision.datasets import VOCSegmentation
+
+VOCSegmentation(
+    root: str | Path,
+    year: str = "2012",
+    image_set: str = "train",
+    download: bool = False,
+    transform=None,
+    target_transform=None,
+    transforms=None,
+)
+```
+
+**`__getitem__` returns** `(PIL.Image, PIL.Image)` — the input image and its palette-mode segmentation mask (one pixel value per semantic class, with `255` for the void/boundary label).
+
+---
+
+## Cityscapes
+
+Urban street-scene dataset with 19 semantic classes, available in fine (`gtFine`) and coarse (`gtCoarse`) annotation quality. Cityscapes is not automatically downloadable; register at [cityscapes-dataset.com](https://www.cityscapes-dataset.com) to obtain the archives.
+
+```python
+from torchvision.datasets import Cityscapes
+
+Cityscapes(
+    root: str | Path,
+    split: str = "train",      # "train" | "val" | "test" | "train_extra" (coarse only)
+    mode: str = "fine",        # "fine" | "coarse"
+    target_type: str | list = "instance",
+                               # "instance" | "semantic" | "polygon" | "color"
+    transform=None,
+    target_transform=None,
+    transforms=None,
+)
+```
+
+`target_type` accepts a single string or a list of types; when a list is passed, `__getitem__` returns a list of targets in the same order.
+
+**`__getitem__` returns** `(PIL.Image, target)` where `target` depends on `target_type`:
+
+| `target_type` | Return type | Description |
+|---|---|---|
+| `"semantic"` | `PIL.Image` | Per-pixel semantic class index (train IDs) |
+| `"instance"` | `PIL.Image` | Per-pixel instance ID |
+| `"color"` | `PIL.Image` | RGB-coloured semantic label image |
+| `"polygon"` | `dict` | Raw polygon annotation JSON dict |
+
+```python
+from torchvision.datasets import Cityscapes
+
+dataset = Cityscapes(
+    root="./data/cityscapes",
+    split="train",
+    mode="fine",
+    target_type=["semantic", "instance"],
+)
+
+image, (sem_mask, inst_mask) = dataset[0]
+```
+
+---
+
+## SBDataset
+
+The Semantic Boundaries Dataset (SBD) provides additional segmentation and boundary annotations for PASCAL VOC images.
+
+```python
+from torchvision.datasets import SBDataset
+
+SBDataset(
+    root: str | Path,
+    image_set: str = "train",   # "train" | "val" | "train_noval"
+    mode: str = "boundaries",   # "boundaries" | "segmentation"
+    download: bool = False,
+    transforms=None,
+)
+```
+
+<Note>
+  The SBD train/val splits differ from the official PASCAL VOC splits. Some VOC `train` images appear in SBD's `val` set. Requires `scipy`.
+</Note>
+
+**`__getitem__` returns:**
+- In `"boundaries"` mode: `(PIL.Image, ndarray[C, H, W])` — one boundary map per class
+- In `"segmentation"` mode: `(PIL.Image, PIL.Image)` — the input image and a segmentation mask
+
+---
+
+## WIDERFace
+
+Face detection dataset with images covering 61 event categories and varying difficulty levels.
+
+```python
+from torchvision.datasets import WIDERFace
+
+WIDERFace(
+    root: str | Path,
+    split: str = "train",    # "train" | "val" | "test"
+    transform=None,
+    target_transform=None,
+    download: bool = False,
+)
+```
+
+<Note>
+  Requires `gdown` (`pip install gdown`) for automatic download.
+</Note>
+
+**`__getitem__` returns** `(PIL.Image, dict | None)`. For `"train"` and `"val"` splits the dict contains:
+
+| Key | Type | Description |
+|---|---|---|
+| `"bbox"` | `Tensor[N, 4]` | Bounding boxes in `[x, y, w, h]` format |
+| `"blur"` | `Tensor[N]` | Blur level (0–2) |
+| `"expression"` | `Tensor[N]` | Expression label |
+| `"illumination"` | `Tensor[N]` | Illumination label |
+| `"occlusion"` | `Tensor[N]` | Occlusion level (0–2) |
+| `"pose"` | `Tensor[N]` | Pose label |
+| `"invalid"` | `Tensor[N]` | Invalid flag |
+
+`target` is `None` for the `"test"` split (no annotations provided).
+
+---
+
+## Kitti
+
+KITTI Vision Benchmark Suite for 2D object detection and depth estimation. Images come with per-instance 3D bounding box annotations in `.txt` files.
+
+```python
+from torchvision.datasets import Kitti
+
+Kitti(
+    root: str | Path,
+    train: bool = True,     # True → training split, False → test split
+    transform=None,
+    target_transform=None,
+    download: bool = False,
+)
+```
+
+**`__getitem__` returns** `(PIL.Image, list[dict])`. Each dict represents one annotated object with keys including `"type"`, `"truncated"`, `"occluded"`, `"alpha"`, `"bbox"` (2D box), `"dimensions"`, `"location"`, `"rotation_y"`.
+
+```python
+from torchvision.datasets import Kitti
+
+dataset = Kitti(root="./data", train=True, download=True)
+image, targets = dataset[0]
+
+for obj in targets:
+    print(obj["type"], obj["bbox"])
+# "Car"  [712.4, 143.0, 810.73, 307.92]
+```
+
+---
+
+## LFW (Labeled Faces in the Wild)
+
+Face recognition dataset with two task variants. Note that **automatic download is no longer supported** — download the dataset manually from [vis-www.cs.umass.edu/lfw](http://vis-www.cs.umass.edu/lfw/).
+
+### LFWPeople
+
+Face identification — each sample is a face image with a person identity label.
+
+```python
+from torchvision.datasets import LFWPeople
+
+LFWPeople(
+    root: str | Path,
+    split: str = "10fold",     # "10fold" | "train" | "test"
+    image_set: str = "funneled",  # "original" | "funneled" | "deepfunneled"
+    transform=None,
+    target_transform=None,
+    download: bool = False,    # no-op; download is no longer supported
+)
+```
+
+**`__getitem__` returns** `(PIL.Image, int)` — face image and person ID.
+
+### LFWPairs
+
+Face verification — each sample is a pair of face images with a binary same/different label.
+
+```python
+from torchvision.datasets import LFWPairs
+
+LFWPairs(
+    root: str | Path,
+    split: str = "10fold",
+    image_set: str = "funneled",
+    transform=None,
+    target_transform=None,
+    download: bool = False,
+)
+```
+
+**`__getitem__` returns** `(PIL.Image, PIL.Image, int)` — two face images and a binary label (1 = same person, 0 = different).
+
+---
+
+## Dataset Summary
+
+| Class | Task | Splits | `download=True` | `__getitem__` target type |
+|---|---|---|---|---|
+| `CocoDetection` | Object detection / instance segmentation | train / val / test | ❌ Manual | `list[dict]` (COCO annotations) |
+| `CocoCaptions` | Image captioning | train / val | ❌ Manual | `list[str]` |
+| `VOCDetection` | Object detection | train / trainval / val / test (2007) | ✅ | `dict` (XML tree) |
+| `VOCSegmentation` | Semantic segmentation | train / trainval / val / test (2007) | ✅ | `PIL.Image` mask |
+| `Cityscapes` | Semantic / instance segmentation | train / val / test / train_extra | ❌ Manual | depends on `target_type` |
+| `SBDataset` | Boundaries / segmentation | train / val / train_noval | ✅ | `ndarray` or `PIL.Image` |
+| `WIDERFace` | Face detection | train / val / test | ✅ (needs gdown) | `dict` of tensors |
+| `Kitti` | 3D object detection | train / test (via `train` bool) | ✅ | `list[dict]` |
+| `LFWPeople` | Face identification | 10fold / train / test | ❌ Manual | `int` |
+| `LFWPairs` | Face verification | 10fold / train / test | ❌ Manual | `int` (binary label) |

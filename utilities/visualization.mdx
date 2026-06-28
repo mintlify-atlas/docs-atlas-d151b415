@@ -1,0 +1,499 @@
+---
+title: "Visualization Utilities for Computer Vision Tasks"
+sidebarTitle: "Visualization"
+description: "Draw bounding boxes, segmentation masks, keypoints, and optical flow on image tensors, and create image grids with torchvision.utils."
+---
+
+The `torchvision.utils` module provides a collection of visualization helpers that operate directly on PyTorch tensors — no conversion to PIL or NumPy required. You can annotate images with detection boxes, segmentation overlays, pose keypoints, and optical flow, then save them individually or arranged into a grid. All drawing functions accept `uint8` **or** floating-point tensors and return a tensor of the same dtype.
+
+---
+
+## make_grid
+
+```python
+torchvision.utils.make_grid(
+    tensor: Tensor | list[Tensor],
+    nrow: int = 8,
+    padding: int = 2,
+    normalize: bool = False,
+    value_range: tuple[int, int] | None = None,
+    scale_each: bool = False,
+    pad_value: float = 0.0,
+) -> Tensor
+```
+
+Arrange a batch of images into a single grid image. Input can be a 4-D mini-batch tensor `(B, C, H, W)` or a list of equal-size 3-D tensors `(C, H, W)`. The grid has `nrow` images per row, for a total layout of `⌈B / nrow⌉` rows.
+
+<ParamField path="tensor" type="Tensor[B, C, H, W] | list[Tensor[C, H, W]]" required>
+  A 4-D batch tensor or a list of 3-D image tensors. All images must have identical spatial dimensions when a list is provided. Single-channel images are automatically replicated to 3 channels.
+</ParamField>
+
+<ParamField path="nrow" type="int" default="8">
+  Number of images per row. The final grid width is `nrow * (W + padding) + padding`.
+</ParamField>
+
+<ParamField path="padding" type="int" default="2">
+  Pixel padding between images and around the border of the grid.
+</ParamField>
+
+<ParamField path="normalize" type="bool" default="False">
+  If `True`, shift and scale all values to `[0, 1]` using the range set by `value_range` (or the tensor's own min/max when `value_range` is `None`).
+</ParamField>
+
+<ParamField path="value_range" type="tuple[int, int] | None" default="None">
+  `(min, max)` tuple used when `normalize=True`. Values are clamped to this range before rescaling. Ignored when `normalize=False`.
+</ParamField>
+
+<ParamField path="scale_each" type="bool" default="False">
+  When `True` and `normalize=True`, normalise each image in the batch independently rather than using global min/max. Useful when images have very different dynamic ranges.
+</ParamField>
+
+<ParamField path="pad_value" type="float" default="0.0">
+  Pixel value used to fill the padding region. `0.0` → black; `1.0` → white (for float tensors).
+</ParamField>
+
+**Returns** `Tensor[C, H_grid, W_grid]` — a single image tensor containing the arranged grid.
+
+```python
+from torchvision.utils import make_grid
+import torch
+
+batch = torch.randint(0, 256, (16, 3, 64, 64), dtype=torch.uint8)
+
+# 4 columns, 4 rows, white padding
+grid = make_grid(batch, nrow=4, padding=4, pad_value=1.0)
+print(grid.shape)  # Tensor[3, H_grid, W_grid]
+```
+
+---
+
+## save_image
+
+```python
+torchvision.utils.save_image(
+    tensor: Tensor | list[Tensor],
+    fp: str | pathlib.Path | BinaryIO,
+    format: str | None = None,
+    **kwargs,
+) -> None
+```
+
+A thin convenience wrapper that calls `make_grid()` on the input, converts to a PIL image, and saves to disk. Extra `**kwargs` (e.g. `nrow`, `padding`, `normalize`) are forwarded directly to `make_grid()`.
+
+<ParamField path="tensor" type="Tensor | list[Tensor]" required>
+  Image or batch of images to save. Same accepted shapes as `make_grid()`.
+</ParamField>
+
+<ParamField path="fp" type="str | pathlib.Path | BinaryIO" required>
+  File path or open file-like object to save to. The format is inferred from the filename extension unless `format` is set.
+</ParamField>
+
+<ParamField path="format" type="str | None" default="None">
+  Image format string understood by PIL, e.g. `"PNG"`, `"JPEG"`. Required when `fp` is a file object with no inferrable extension.
+</ParamField>
+
+<ParamField path="**kwargs" type="any">
+  Additional keyword arguments passed to `make_grid()` (e.g. `nrow`, `normalize`, `value_range`).
+</ParamField>
+
+```python
+from torchvision.utils import make_grid, save_image
+import torch
+
+batch = torch.rand(16, 3, 64, 64)  # float32 in [0, 1]
+
+# Save a normalised 4-column grid directly
+save_image(batch, "grid.png", nrow=4, normalize=True)
+
+# Equivalent explicit approach
+grid = make_grid(batch, nrow=4, normalize=True)
+save_image(grid, "grid_explicit.png")
+```
+
+---
+
+## draw_bounding_boxes
+
+```python
+torchvision.utils.draw_bounding_boxes(
+    image: Tensor,
+    boxes: Tensor,
+    labels: list[str] | None = None,
+    colors: list[str | tuple] | str | tuple | None = None,
+    fill: bool = False,
+    width: int = 1,
+    font: str | None = None,
+    font_size: int | None = None,
+    label_colors: list[str | tuple] | str | tuple | None = None,
+    label_background_colors: list[str | tuple] | str | tuple | None = None,
+    fill_labels: bool = False,
+) -> Tensor
+```
+
+Draw bounding boxes (and optional text labels) onto an RGB or grayscale image tensor. Accepts both axis-aligned boxes `(N, 4)` in `[xmin, ymin, xmax, ymax]` format and oriented (rotated) boxes `(N, 8)` as `[x1, y1, x2, y2, x3, y3, x4, y4]`.
+
+<ParamField path="image" type="Tensor[C, H, W]" required>
+  Input image as a `uint8` or float tensor. `C` must be `1` (grayscale, auto-expanded to RGB) or `3` (RGB). Grayscale images are converted to RGB for drawing. Float images are expected in `[0, 1]`.
+</ParamField>
+
+<ParamField path="boxes" type="Tensor[N, 4] | Tensor[N, 8]" required>
+  Bounding boxes in absolute pixel coordinates. Shape `(N, 4)` for axis-aligned XYXY boxes; shape `(N, 8)` for rotated boxes defined by 4 corner points.
+</ParamField>
+
+<ParamField path="labels" type="list[str] | None" default="None">
+  List of `N` label strings drawn at the top-left corner of each box. Omit for unlabelled boxes.
+</ParamField>
+
+<ParamField path="colors" type="list | str | tuple | None" default="None">
+  Box outline colours. Accepts PIL colour names (`"red"`), hex strings (`"#FF0000"`), or RGB tuples (`(255, 0, 0)`). A single value applies to all boxes; a list assigns one colour per box. Random colours are generated when `None`.
+</ParamField>
+
+<ParamField path="fill" type="bool" default="False">
+  Fill box interiors with a semi-transparent version of the border colour. Save as PNG to preserve alpha when using `fill=True`.
+</ParamField>
+
+<ParamField path="width" type="int" default="1">
+  Border line width in pixels.
+</ParamField>
+
+<ParamField path="font" type="str | None" default="None">
+  Path to a TrueType font file for label text. Falls back to PIL's default bitmap font when `None`.
+</ParamField>
+
+<ParamField path="font_size" type="int | None" default="None">
+  Font size in points. Ignored if `font` is `None`.
+</ParamField>
+
+<ParamField path="label_colors" type="list | str | tuple | None" default="None">
+  Text colour for each label. Defaults to the same colour used for the box outline, or black when `fill_labels=True`.
+</ParamField>
+
+<ParamField path="label_background_colors" type="list | str | tuple | None" default="None">
+  Fill colour for label background boxes. Defaults to the box border colour. Only relevant when `fill_labels=True`.
+</ParamField>
+
+<ParamField path="fill_labels" type="bool" default="False">
+  Fill label text backgrounds with `label_background_colors`.
+</ParamField>
+
+**Returns** `Tensor[C, H, W]` — annotated image with the same dtype as `image`.
+
+```python
+import torch
+from torchvision.utils import draw_bounding_boxes
+from torchvision.io import decode_image
+
+img = decode_image("image.jpg")  # uint8 Tensor[3, H, W]
+boxes = torch.tensor(
+    [[100, 50, 300, 250], [400, 100, 600, 350]],
+    dtype=torch.float,
+)
+labels = ["cat", "dog"]
+colors = ["red", "blue"]
+
+result = draw_bounding_boxes(img, boxes, labels=labels, colors=colors, width=3)
+
+# Convert to PIL for display or further saving
+from torchvision.transforms.v2.functional import to_pil_image
+pil_img = to_pil_image(result)
+pil_img.save("annotated.jpg")
+```
+
+<Tip>
+  Use `fill=True` with `write_png()` rather than `write_jpeg()` when boxes are filled — JPEG compression will degrade the semi-transparent overlay.
+</Tip>
+
+---
+
+## draw_segmentation_masks
+
+```python
+torchvision.utils.draw_segmentation_masks(
+    image: Tensor,
+    masks: Tensor,
+    alpha: float = 0.8,
+    colors: list[str | tuple] | str | tuple | None = None,
+) -> Tensor
+```
+
+Blend coloured mask overlays onto an RGB image. Each boolean mask in `masks` is filled with a distinct colour, then composited with `alpha` transparency over the base image. Pixels covered by multiple masks are set to black to highlight overlaps.
+
+<ParamField path="image" type="Tensor[3, H, W]" required>
+  RGB image as a `uint8` or float tensor. Must be exactly 3 channels.
+</ParamField>
+
+<ParamField path="masks" type="Tensor[N, H, W] | Tensor[H, W]" required>
+  Boolean (`dtype=torch.bool`) mask tensor. Shape `(N, H, W)` for `N` instance masks, or `(H, W)` for a single mask. Spatial dimensions must match `image`.
+</ParamField>
+
+<ParamField path="alpha" type="float" default="0.8">
+  Mask opacity in `[0, 1]`. `0` → fully transparent (masks invisible); `1` → fully opaque (original image hidden under masks).
+</ParamField>
+
+<ParamField path="colors" type="list | str | tuple | None" default="None">
+  Colour(s) for each mask. Accepts PIL colour names, hex strings, or RGB tuples. A single value is applied to all masks. Random colours are generated when `None`.
+</ParamField>
+
+**Returns** `Tensor[C, H, W]` with the same dtype as `image`.
+
+```python
+import torch
+from torchvision.utils import draw_segmentation_masks
+from torchvision.io import decode_image
+
+img = decode_image("scene.jpg", mode="RGB")  # uint8 Tensor[3, H, W]
+H, W = img.shape[1], img.shape[2]
+
+# Two binary masks (e.g. from a segmentation model)
+masks = torch.zeros(2, H, W, dtype=torch.bool)
+masks[0, 50:200, 80:300] = True   # person 1
+masks[1, 100:350, 250:500] = True  # person 2
+
+result = draw_segmentation_masks(
+    img, masks, alpha=0.6, colors=["cyan", "magenta"]
+)
+```
+
+<Note>
+  Pixels where two or more masks overlap are set to black (`0`) regardless of colour. This highlights ambiguous regions. The blending formula is `output = image * (1 - alpha) + mask_image * alpha`.
+</Note>
+
+---
+
+## draw_keypoints
+
+```python
+torchvision.utils.draw_keypoints(
+    image: Tensor,
+    keypoints: Tensor,
+    connectivity: list[tuple[int, int]] | None = None,
+    colors: str | tuple | None = None,
+    radius: int = 2,
+    width: int = 3,
+    visibility: Tensor | None = None,
+) -> Tensor
+```
+
+Draw keypoints (and optionally skeleton connections) onto an RGB image tensor. Supports multiple instances simultaneously and respects per-keypoint visibility flags.
+
+<ParamField path="image" type="Tensor[3, H, W]" required>
+  RGB image as a `uint8` or float tensor. Must have exactly 3 channels.
+</ParamField>
+
+<ParamField path="keypoints" type="Tensor[N, K, 2]" required>
+  `N` instances, each with `K` keypoints in `[x, y]` pixel coordinates. Integer coordinates are expected.
+</ParamField>
+
+<ParamField path="connectivity" type="list[tuple[int, int]] | None" default="None">
+  Skeleton definition as a list of `(start_idx, end_idx)` tuples referencing keypoint indices. A line is drawn between connected keypoints only when both are visible. Connections are evaluated per-instance.
+</ParamField>
+
+<ParamField path="colors" type="str | tuple | None" default="None">
+  Colour for both keypoint circles and skeleton lines. Accepts a PIL colour string or an RGB tuple.
+</ParamField>
+
+<ParamField path="radius" type="int" default="2">
+  Radius in pixels for the keypoint ellipses.
+</ParamField>
+
+<ParamField path="width" type="int" default="3">
+  Line width in pixels for skeleton connections.
+</ParamField>
+
+<ParamField path="visibility" type="Tensor[N, K] | None" default="None">
+  Boolean tensor indicating which keypoints are visible. `True` → draw point and eligible connections; `False` → skip. Defaults to all-visible when `None`.
+</ParamField>
+
+**Returns** `Tensor[C, H, W]` with the same dtype as `image`.
+
+```python
+import torch
+from torchvision.utils import draw_keypoints
+from torchvision.io import decode_image
+
+img = decode_image("person.jpg", mode="RGB")
+
+# COCO-style upper-body skeleton (5 keypoints per person)
+# 0=nose, 1=l_shoulder, 2=r_shoulder, 3=l_elbow, 4=r_elbow
+keypoints = torch.tensor([
+    [[320, 80], [280, 160], [360, 160], [240, 240], [400, 240]],  # person 1
+    [[150, 90], [120, 170], [180, 170], [100, 250], [200, 250]],  # person 2
+], dtype=torch.float)
+
+skeleton = [(0, 1), (0, 2), (1, 3), (2, 4)]  # nose→shoulders→elbows
+
+result = draw_keypoints(
+    img,
+    keypoints,
+    connectivity=skeleton,
+    colors="lime",
+    radius=4,
+    width=2,
+)
+```
+
+---
+
+## flow_to_image
+
+```python
+torchvision.utils.flow_to_image(flow: Tensor) -> Tensor
+```
+
+Convert an optical flow field to a colour-coded RGB image for visualisation. Direction is encoded as hue (angle on a colour wheel) and magnitude as saturation, following the [Middlebury evaluation colour scheme](http://vision.middlebury.edu/flow/flowEval-iccv07.pdf).
+
+<ParamField path="flow" type="Tensor[N, 2, H, W] | Tensor[2, H, W]" required>
+  Optical flow field as a `torch.float32` tensor. The two channels are the horizontal (`u`) and vertical (`v`) displacement components in pixels. Accepts an unbatched `(2, H, W)` tensor or a batched `(N, 2, H, W)` tensor.
+</ParamField>
+
+**Returns** `Tensor[N, 3, H, W]` or `Tensor[3, H, W]` — `uint8` RGB visualisation matching the input shape convention.
+
+```python
+import torch
+from torchvision.utils import flow_to_image
+
+# Synthetic flow field (e.g. from an optical flow model)
+flow = torch.randn(1, 2, 256, 256)  # Tensor[N=1, 2, H, W] float32
+
+rgb = flow_to_image(flow)  # Tensor[1, 3, 256, 256] uint8
+print(rgb.shape, rgb.dtype)
+# torch.Size([1, 3, 256, 256]) torch.uint8
+
+# Unbatched usage
+flow_single = torch.randn(2, 256, 256)
+rgb_single = flow_to_image(flow_single)  # Tensor[3, 256, 256]
+```
+
+<Note>
+  `flow_to_image()` normalises the flow by its global maximum magnitude before mapping to colours. If your flow values are already normalised to `[-1, 1]`, the resulting colours will still be correct but the magnitude shading will reflect the relative distribution within the batch.
+</Note>
+
+---
+
+## Full Detection Visualization Example
+
+<Steps>
+
+<Step title="Load image and run detection">
+```python
+import torch
+from torchvision.io import decode_image
+
+img = decode_image("street.jpg", mode="RGB")  # uint8 Tensor[3, H, W]
+
+# Simulated model outputs
+boxes = torch.tensor([
+    [100,  50, 300, 250],
+    [400, 100, 600, 350],
+    [ 20,  80, 180, 300],
+], dtype=torch.float)
+
+scores = torch.tensor([0.92, 0.87, 0.78])
+labels = ["car", "person", "bicycle"]
+```
+</Step>
+
+<Step title="Draw bounding boxes">
+```python
+from torchvision.utils import draw_bounding_boxes
+
+annotated = draw_bounding_boxes(
+    img,
+    boxes,
+    labels=[f"{l} {s:.2f}" for l, s in zip(labels, scores)],
+    colors=["red", "blue", "green"],
+    width=3,
+    fill=False,
+)
+```
+</Step>
+
+<Step title="Overlay segmentation masks">
+```python
+from torchvision.utils import draw_segmentation_masks
+
+H, W = img.shape[1], img.shape[2]
+masks = torch.zeros(3, H, W, dtype=torch.bool)
+masks[0, 50:250, 100:300] = True   # car mask
+masks[1, 100:350, 400:600] = True  # person mask
+masks[2, 80:300, 20:180] = True    # bicycle mask
+
+annotated = draw_segmentation_masks(
+    annotated, masks, alpha=0.4, colors=["red", "blue", "green"]
+)
+```
+</Step>
+
+<Step title="Save the result">
+```python
+from torchvision.transforms.v2.functional import to_pil_image
+
+pil_img = to_pil_image(annotated)
+pil_img.save("detections.png")
+```
+</Step>
+
+</Steps>
+
+---
+
+## Grid Visualization
+
+Create a compact preview of a dataset batch or augmented images:
+
+```python
+from torchvision.utils import make_grid, save_image
+import torch
+
+# Simulate a batch of 16 RGB images at 64×64
+batch = torch.rand(16, 3, 64, 64)
+
+# Arrange into a 4×4 grid with normalisation
+grid = make_grid(batch, nrow=4, padding=4, normalize=True, pad_value=1.0)
+save_image(grid, "batch_preview.png")
+
+# Comparison grid: original vs augmented (2 rows of 8)
+originals  = torch.rand(8, 3, 64, 64)
+augmented  = originals + 0.1 * torch.randn_like(originals)
+comparison = make_grid(
+    torch.cat([originals, augmented], dim=0),
+    nrow=8, padding=2, normalize=True,
+)
+save_image(comparison, "augmentation_comparison.png")
+```
+
+<Tip>
+  Set `scale_each=True` in `make_grid()` when comparing images with very different value ranges (e.g. model activations at different layers) so each image is normalised independently rather than sharing a global scale.
+</Tip>
+
+---
+
+## API Quick Reference
+
+<CardGroup cols={2}>
+
+<Card title="make_grid" icon="grid">
+  Tile a batch of images into a single grid tensor. Supports normalisation, padding colour, and per-image scaling.
+</Card>
+
+<Card title="save_image" icon="floppy-disk">
+  One-liner to call `make_grid()` and save the result. Accepts all `make_grid` kwargs.
+</Card>
+
+<Card title="draw_bounding_boxes" icon="square-dashed">
+  Annotate images with axis-aligned or rotated boxes, optional labels, fill, custom fonts and colours.
+</Card>
+
+<Card title="draw_segmentation_masks" icon="fill">
+  Blend coloured boolean masks onto an image with configurable transparency.
+</Card>
+
+<Card title="draw_keypoints" icon="circle-dot">
+  Render human-pose or landmark keypoints with optional skeleton connectivity and per-keypoint visibility.
+</Card>
+
+<Card title="flow_to_image" icon="arrows-left-right">
+  Map an optical flow tensor to a hue-encoded `uint8` RGB image for inspection.
+</Card>
+
+</CardGroup>

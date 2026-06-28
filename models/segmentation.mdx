@@ -1,0 +1,303 @@
+---
+title: "Semantic Segmentation Models: DeepLabV3, FCN, LRASPP"
+sidebarTitle: "Segmentation"
+description: "Pre-trained semantic segmentation models in TorchVision — DeepLabV3, FCN, and LRASPP — trained on 21 PASCAL VOC categories from COCO 2017."
+---
+
+TorchVision provides three families of pre-trained **semantic segmentation** models — DeepLabV3, FCN, and LRASPP — that assign a class label to every pixel in an image. Unlike instance segmentation (which separates individual objects), semantic segmentation produces a single flat label map. All pretrained weights were trained on a **21-class subset of COCO 2017** that matches the Pascal VOC categories, making them immediately useful for outdoor-scene understanding tasks.
+
+<Note>
+  Semantic segmentation models take a **single batched tensor** `[B, 3, H, W]` as input (unlike detection models, which take a list). The `weights.transforms()` preprocessor handles resizing to 520×520 and ImageNet normalization automatically.
+</Note>
+
+---
+
+## PASCAL VOC Class Categories
+
+All pretrained segmentation weights use the following 21-class vocabulary (index 0 is background):
+
+| Index | Class | Index | Class | Index | Class |
+|-------|-------|-------|-------|-------|-------|
+| 0 | `__background__` | 7 | car | 14 | motorbike |
+| 1 | aeroplane | 8 | cat | 15 | person |
+| 2 | bicycle | 9 | chair | 16 | pottedplant |
+| 3 | bird | 10 | cow | 17 | sheep |
+| 4 | boat | 11 | diningtable | 18 | sofa |
+| 5 | bottle | 12 | dog | 19 | train |
+| 6 | bus | 13 | horse | 20 | tvmonitor |
+
+---
+
+## Input / Output Contract
+
+<Steps>
+  <Step title="Load model and preprocessor">
+    ```python
+    import torch
+    from torchvision.models.segmentation import (
+        deeplabv3_resnet50,
+        DeepLabV3_ResNet50_Weights,
+    )
+    from torchvision.io import read_image
+
+    weights = DeepLabV3_ResNet50_Weights.DEFAULT
+    model   = deeplabv3_resnet50(weights=weights)
+    model.eval()
+
+    preprocess = weights.transforms()
+    ```
+  </Step>
+
+  <Step title="Preprocess and run inference">
+    Segmentation models expect a **batched** tensor, not a list.
+
+    ```python
+    img   = read_image("image.jpg")          # Tensor[3, H, W], uint8
+    batch = preprocess(img).unsqueeze(0)     # Tensor[1, 3, 520, 520]
+
+    with torch.no_grad():
+        output = model(batch)
+
+    # output is an OrderedDict with:
+    # 'out': FloatTensor[1, 21, H, W]  — main logits
+    # 'aux': FloatTensor[1, 21, H', W'] — auxiliary logits (only when aux_loss=True)
+    pred_mask = output["out"].argmax(dim=1).squeeze(0)  # LongTensor[H, W]
+    ```
+  </Step>
+
+  <Step title="Visualise results">
+    ```python
+    from torchvision.utils import draw_segmentation_masks
+
+    # Draw a per-class coloured overlay on the original image
+    class_id   = 15  # 'person'
+    bool_masks = (pred_mask == class_id)             # Tensor[H, W] bool
+    result     = draw_segmentation_masks(
+        img,
+        bool_masks.unsqueeze(0),   # must be [N, H, W]
+        alpha=0.5,
+        colors=["green"],
+    )
+    ```
+
+    <Tip>
+      `draw_segmentation_masks` accepts the **original** uint8 image tensor, not the preprocessed float tensor. Pass `img` (before `preprocess`), not `batch`.
+    </Tip>
+  </Step>
+</Steps>
+
+---
+
+## DeepLabV3
+
+DeepLabV3 uses **Atrous Spatial Pyramid Pooling (ASPP)** to capture multi-scale context without losing resolution. Dilated (atrous) convolutions with rates `{12, 24, 36}` are applied in parallel, allowing the network to aggregate information across large receptive fields while maintaining the spatial output stride.
+
+<CardGroup cols={3}>
+  <Card title="deeplabv3_resnet50" icon="brain">
+    ResNet-50 backbone. Fastest ResNet variant.
+    **mIoU: 66.4** | 42.0M params | 178.7 GFLOPs
+  </Card>
+  <Card title="deeplabv3_resnet101" icon="server">
+    ResNet-101 backbone. Higher accuracy.
+    **mIoU: 67.4** | 61.0M params | 258.7 GFLOPs
+  </Card>
+  <Card title="deeplabv3_mobilenet_v3_large" icon="mobile">
+    MobileNetV3-Large. Mobile-friendly.
+    **mIoU: 60.3** | 11.0M params | 10.5 GFLOPs
+  </Card>
+</CardGroup>
+
+```python
+from torchvision.models.segmentation import (
+    deeplabv3_resnet50,        DeepLabV3_ResNet50_Weights,
+    deeplabv3_resnet101,       DeepLabV3_ResNet101_Weights,
+    deeplabv3_mobilenet_v3_large, DeepLabV3_MobileNet_V3_Large_Weights,
+)
+
+# ResNet-50 — best speed/accuracy for server deployment
+model_r50 = deeplabv3_resnet50(
+    weights=DeepLabV3_ResNet50_Weights.DEFAULT
+)
+
+# ResNet-101 — higher mIoU at the cost of more compute
+model_r101 = deeplabv3_resnet101(
+    weights=DeepLabV3_ResNet101_Weights.DEFAULT
+)
+
+# MobileNetV3-Large — mobile-friendly variant
+model_mob = deeplabv3_mobilenet_v3_large(
+    weights=DeepLabV3_MobileNet_V3_Large_Weights.DEFAULT
+)
+```
+
+<Note>
+  The `DEFAULT` alias for all three DeepLabV3 weight enums is `COCO_WITH_VOC_LABELS_V1` — trained on COCO images filtered to the 20 Pascal VOC object categories (plus background), giving 21 output classes total.
+</Note>
+
+---
+
+## FCN (Fully Convolutional Network)
+
+FCN was one of the first end-to-end deep networks for dense prediction. It replaces the fully-connected classification head with convolutional layers and uses **skip connections** from earlier pooling layers to recover spatial detail. TorchVision ships two backbone variants, both using the same ResNet FPN feature extractor.
+
+<CardGroup cols={2}>
+  <Card title="fcn_resnet50" icon="diagram-project">
+    ResNet-50 backbone.
+    **mIoU: 60.5 · pixel acc: 91.4%** | 35.3M params | 152.7 GFLOPs
+  </Card>
+  <Card title="fcn_resnet101" icon="diagram-predecessor">
+    ResNet-101 backbone. Higher accuracy.
+    **mIoU: 63.7 · pixel acc: 91.9%** | 54.3M params | 232.7 GFLOPs
+  </Card>
+</CardGroup>
+
+```python
+from torchvision.models.segmentation import (
+    fcn_resnet50,   FCN_ResNet50_Weights,
+    fcn_resnet101,  FCN_ResNet101_Weights,
+)
+
+weights_50  = FCN_ResNet50_Weights.DEFAULT
+model_fcn50 = fcn_resnet50(weights=weights_50)
+model_fcn50.eval()
+
+weights_101  = FCN_ResNet101_Weights.DEFAULT
+model_fcn101 = fcn_resnet101(weights=weights_101)
+model_fcn101.eval()
+
+# Inference is identical to DeepLabV3:
+preprocess = weights_50.transforms()
+batch      = preprocess(read_image("image.jpg")).unsqueeze(0)
+
+with torch.no_grad():
+    output = model_fcn50(batch)
+
+pred_mask = output["out"].argmax(dim=1).squeeze(0)  # LongTensor[H, W]
+```
+
+---
+
+## LRASPP (Lite R-ASPP)
+
+LRASPP (Lite Reduced Atrous Spatial Pyramid Pooling) is a **mobile-first** segmentation head introduced in the MobileNetV3 paper. It simplifies the ASPP module by using a single large-kernel average-pooling branch and depthwise convolutions, trading a few mIoU points for a dramatic reduction in parameters and FLOPs.
+
+| Weight | mIoU | Pixel Acc | Params | GFLOPs | File size |
+|--------|------|-----------|--------|--------|-----------|
+| `COCO_WITH_VOC_LABELS_V1` (DEFAULT) | 57.9 | 91.2% | 3.2M | 2.1 | 12.5 MB |
+
+```python
+from torchvision.models.segmentation import (
+    lraspp_mobilenet_v3_large,
+    LRASPP_MobileNet_V3_Large_Weights,
+)
+
+weights = LRASPP_MobileNet_V3_Large_Weights.DEFAULT
+model   = lraspp_mobilenet_v3_large(weights=weights)
+model.eval()
+
+preprocess = weights.transforms()
+img        = read_image("image.jpg")
+batch      = preprocess(img).unsqueeze(0)    # [1, 3, 520, 520]
+
+with torch.no_grad():
+    output = model(batch)
+
+# LRASPP only returns 'out' — no auxiliary output
+pred_mask = output["out"].argmax(dim=1).squeeze(0)  # LongTensor[H, W]
+```
+
+<Warning>
+  LRASPP does **not** support `aux_loss=True`. Passing `aux_loss=True` raises `NotImplementedError`. If you need auxiliary training losses, use DeepLabV3 or FCN instead.
+</Warning>
+
+---
+
+## Auxiliary Loss During Training
+
+DeepLabV3 and FCN both support an **auxiliary classification head** attached to an intermediate layer (`layer3` of ResNet). When `aux_loss=True`, the `output["aux"]` key is populated during the forward pass.
+
+```python
+from torchvision.models.segmentation import deeplabv3_resnet50
+
+# Enable auxiliary head for training
+model = deeplabv3_resnet50(
+    weights=None,      # no pretrained weights — training from scratch
+    num_classes=21,
+    aux_loss=True,
+)
+model.train()
+
+batch = torch.rand(2, 3, 520, 520)
+output = model(batch)
+
+# output["out"]:  FloatTensor[2, 21, H, W] — main head
+# output["aux"]:  FloatTensor[2, 21, H', W'] — auxiliary head
+main_loss = criterion(output["out"], targets)
+aux_loss  = criterion(output["aux"], targets)
+total     = main_loss + 0.5 * aux_loss   # 0.5 weight is conventional
+total.backward()
+```
+
+<Note>
+  When loading pretrained weights (`weights=DeepLabV3_ResNet50_Weights.DEFAULT`), `aux_loss` is automatically set to `True` because the pretrained checkpoint includes the auxiliary head parameters.
+</Note>
+
+---
+
+## Complete Inference Example
+
+```python
+import torch
+from torchvision.models.segmentation import (
+    deeplabv3_resnet50,
+    DeepLabV3_ResNet50_Weights,
+)
+from torchvision.utils import draw_segmentation_masks
+from torchvision.io import read_image
+
+# 1. Load model
+weights = DeepLabV3_ResNet50_Weights.DEFAULT
+model   = deeplabv3_resnet50(weights=weights)
+model.eval()
+
+# 2. Load and preprocess image
+preprocess = weights.transforms()
+img        = read_image("image.jpg")             # uint8 Tensor[3, H, W]
+batch      = preprocess(img).unsqueeze(0)        # float Tensor[1, 3, 520, 520]
+
+# 3. Run inference
+with torch.no_grad():
+    output = model(batch)
+
+# 4. Decode predictions
+pred_mask = output["out"].argmax(dim=1).squeeze(0)  # LongTensor[H, W]
+
+# 5. Overlay masks for every detected class
+num_classes = 21
+all_bool_masks = torch.stack(
+    [pred_mask == i for i in range(num_classes)]
+)  # BoolTensor[21, H, W]
+
+result = draw_segmentation_masks(
+    img,
+    masks=all_bool_masks,
+    alpha=0.6,
+)
+```
+
+---
+
+## Model Comparison
+
+| Model | mIoU | Pixel Acc | Params | GFLOPs | File size |
+|-------|------|-----------|--------|--------|-----------|
+| `deeplabv3_resnet101` | **67.4** | 92.4% | 61.0M | 258.7 | 233 MB |
+| `deeplabv3_resnet50` | 66.4 | 92.4% | 42.0M | 178.7 | 161 MB |
+| `fcn_resnet101` | 63.7 | 91.9% | 54.3M | 232.7 | 208 MB |
+| `fcn_resnet50` | 60.5 | 91.4% | 35.3M | 152.7 | 135 MB |
+| `deeplabv3_mobilenet_v3_large` | 60.3 | 91.2% | 11.0M | 10.5 | 42 MB |
+| `lraspp_mobilenet_v3_large` | 57.9 | 91.2% | 3.2M | 2.1 | **12.5 MB** |
+
+<Tip>
+  For edge or mobile deployment, `lraspp_mobilenet_v3_large` is the clear winner at only 3.2M parameters and 2.1 GFLOPs — roughly **85×** fewer FLOPs than `deeplabv3_resnet101` with only a ~10 point mIoU trade-off.
+</Tip>

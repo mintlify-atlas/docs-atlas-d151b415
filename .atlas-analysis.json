@@ -1,0 +1,131 @@
+{
+  "projectType": "ai-ml",
+  "projectName": "TorchVision",
+  "projectDescription": "TorchVision is PyTorch's official computer vision library, providing datasets, model architectures, image/video transforms, and vision-specific operations for training and inference.",
+  "theme": "maple",
+  "primaryColor": "#d63718",
+  "lightColor": "#d17360",
+  "darkColor": "#ffffff",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "installation",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Transforms",
+            "pages": [
+              "transforms/overview",
+              "transforms/v2-guide",
+              "transforms/augmentation"
+            ]
+          },
+          {
+            "group": "Datasets",
+            "pages": [
+              "datasets/overview",
+              "datasets/classification",
+              "datasets/detection-segmentation",
+              "datasets/video-flow"
+            ]
+          },
+          {
+            "group": "I/O & Utilities",
+            "pages": [
+              "io/image-video",
+              "utilities/visualization"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Models",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "models/overview",
+              "models/weights-api"
+            ]
+          },
+          {
+            "group": "Classification",
+            "pages": [
+              "models/classification",
+              "models/quantization"
+            ]
+          },
+          {
+            "group": "Object Detection",
+            "pages": [
+              "models/detection",
+              "models/segmentation"
+            ]
+          },
+          {
+            "group": "Video & Optical Flow",
+            "pages": [
+              "models/video",
+              "models/optical-flow"
+            ]
+          },
+          {
+            "group": "Feature Extraction & Ops",
+            "pages": [
+              "models/feature-extraction",
+              "ops/overview"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "60+ pre-trained model architectures for classification, detection, segmentation, video, and optical flow",
+    "Multi-API Weights system for loading pre-trained weights with associated transforms and metadata",
+    "Transforms v2 API with support for images, bounding boxes, masks, keypoints, and videos in a unified pipeline",
+    "50+ benchmark datasets covering classification, detection, segmentation, optical flow, stereo matching, and video tasks",
+    "Vision-specific operators: RoI Align, NMS, Deformable Convolution, Feature Pyramid Network, focal loss, and more",
+    "Image and video I/O utilities supporting JPEG, PNG, AVIF, HEIC, WebP, GIF formats",
+    "Feature extraction API using torch.fx for intermediate layer outputs",
+    "TVTensors: typed tensor subclasses (Image, BoundingBoxes, Mask, KeyPoints, Video) for safe transform pipelines",
+    "Quantized model variants for efficient inference on resource-constrained devices",
+    "Visualization utilities: make_grid, draw_bounding_boxes, draw_segmentation_masks, draw_keypoints, flow_to_image"
+  ],
+  "publicApiSurface": [
+    "torchvision.models.get_model(name, weights=None, **config)",
+    "torchvision.models.list_models(module=None)",
+    "torchvision.models.get_model_weights(name)",
+    "torchvision.models.get_weight(name)",
+    "torchvision.models.WeightsEnum / torchvision.models.Weights",
+    "torchvision.models.resnet50(weights=ResNet50_Weights.DEFAULT)",
+    "torchvision.models.detection.fasterrcnn_resnet50_fpn(weights=...)",
+    "torchvision.models.segmentation.deeplabv3_resnet50(weights=...)",
+    "torchvision.models.video.r3d_18(weights=...)",
+    "torchvision.models.optical_flow.raft_large(weights=...)",
+    "torchvision.models.quantization.mobilenet_v2(weights=...)",
+    "torchvision.models.feature_extraction.create_feature_extractor(model, return_nodes)",
+    "torchvision.models.feature_extraction.get_graph_node_names(model)",
+    "torchvision.transforms.v2.Compose / RandomHorizontalFlip / Resize / Normalize / ToDtype / ...",
+    "torchvision.transforms.v2.functional (functional transforms API)",
+    "torchvision.tv_tensors.Image / BoundingBoxes / Mask / KeyPoints / Video",
+    "torchvision.datasets.ImageFolder / DatasetFolder / VisionDataset",
+    "torchvision.datasets.CIFAR10 / ImageNet / COCO / VOC / Cityscapes / Kinetics / ...",
+    "torchvision.datasets.wrap_dataset_for_transforms_v2(dataset)",
+    "torchvision.io.read_image / decode_image / read_file / write_jpeg / write_png",
+    "torchvision.io.read_video / write_video / read_video_timestamps",
+    "torchvision.ops.nms / batched_nms / box_iou / box_convert / masks_to_boxes",
+    "torchvision.ops.RoIAlign / RoIPool / PSRoIAlign / MultiScaleRoIAlign",
+    "torchvision.ops.DeformConv2d / FeaturePyramidNetwork / sigmoid_focal_loss",
+    "torchvision.ops.StochasticDepth / DropBlock2d / Conv2dNormActivation / MLP",
+    "torchvision.utils.make_grid / save_image / draw_bounding_boxes / draw_segmentation_masks / draw_keypoints / flow_to_image",
+    "torchvision.set_image_backend / get_image_backend / set_video_backend / get_video_backend"
+  ]
+}

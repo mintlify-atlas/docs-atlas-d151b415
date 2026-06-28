@@ -1,47 +1,156 @@
 ---
-title: "Quickstart"
-description: "Begin with a guide on the fastest path to a successful outcome"
+title: "Get Started with TorchVision in Minutes"
+sidebarTitle: "Quickstart"
+description: "Load a pre-trained model, preprocess an image with built-in transforms, run image classification and object detection inference end-to-end."
 ---
 
-Describe how someone begins using your product. What is the first thing they need to do? Are there any prerequisites?
-
-A quickstart should take someone from zero to using your product. They'll get a quick win and a sense of what they can accomplish.
-
-## Prerequisites
-
-Before you begin, you must have:
-
-- Requirement one (for example, Node.js 18+, a free account, an API key)
-- Requirement two (for example, a compatible device, a compatible browser, a compatible operating system)
-
-## Get started
+TorchVision is designed so that you can go from a raw image file to a meaningful prediction in fewer than fifteen lines of Python. This guide walks through two complete end-to-end examples — image classification with ResNet-50 and object detection with Faster R-CNN — using only real, stable APIs. By the end you will understand how TorchVision's weights system, built-in preprocessing transforms, and I/O utilities all fit together.
 
 <Steps>
-  <Step title="Install">
-    Describe how to install your product or sign up.
 
-    ```bash
-    npm install your-package
-    ```
-  </Step>
-  <Step title="Configure">
-    Describe any setup or configuration needed before first use.
+### Install TorchVision
 
-    ```bash
-    your-cli init
-    ```
-  </Step>
-  <Step title="Run it">
-    Show the first thing a user does to see it working.
+Install `torch` and `torchvision` together to guarantee version compatibility. The command below installs the CPU build; replace the index URL with a CUDA variant for GPU support (see the [Installation guide](/installation) for details).
 
-    ```bash
-    your-cli start
-    ```
-  </Step>
-</Steps>
+```bash
+pip install torch torchvision
+```
+
+Verify the install:
+
+```python
+import torchvision
+print(torchvision.__version__)  # e.g. 0.21.0
+```
+
+### Load a Pre-Trained Model with Weights
+
+TorchVision v0.13 introduced a typed `WeightsEnum` API that replaces the old `pretrained=True` boolean flag. Every weight entry bundles the download URL, the correct preprocessing transforms, and metadata such as the accuracy on ImageNet and the list of class names — everything you need in one object.
+
+```python
+from torchvision.models import resnet50, ResNet50_Weights
+
+# ResNet50_Weights.DEFAULT always resolves to the best available weights
+weights = ResNet50_Weights.DEFAULT
+model = resnet50(weights=weights)
+model.eval()
+```
 
 <Tip>
-  Give people a way to get help. This could be a link to a support page, a chat with a customer support agent, or a forum for your product.
-
-  Example: Need help? Reach out to us at [support@yourcompany.com](mailto:support@yourcompany.com).
+  Calling `model.eval()` is **required** before running inference. Without it, layers such as `BatchNorm` and `Dropout` behave as if the model is still training, which produces incorrect and non-deterministic predictions.
 </Tip>
+
+You can also discover all available weights variants for any model:
+
+```python
+from torchvision.models import ResNet50_Weights
+
+# List every available weights entry for ResNet-50
+for w in ResNet50_Weights:
+    print(w, w.meta["acc@1"])
+```
+
+### Preprocess an Image Using `weights.transforms()`
+
+The `weights` object exposes a `transforms()` factory that returns the exact preprocessing pipeline the model was trained with — no need to hard-code `Normalize` mean/std values or resize dimensions by hand.
+
+```python
+from torchvision.io import read_image
+
+# Read a JPEG or PNG from disk as a uint8 RGB tensor  [C, H, W]
+img = read_image("path/to/image.jpg")
+
+# Build the preprocessing pipeline from the weights metadata
+preprocess = weights.transforms()
+
+# Apply preprocessing and add the batch dimension  →  [1, C, H, W]
+batch = preprocess(img).unsqueeze(0)
+```
+
+<Info>
+  `read_image` returns a `torch.Tensor` of shape `[C, H, W]` with `dtype=torch.uint8`. The `preprocess` transform handles resizing, center-cropping, conversion to `float32`, and normalization automatically.
+</Info>
+
+### Run Classification Inference
+
+Pass the preprocessed batch through the model, apply softmax to get probabilities, and look up the predicted class name from the weights metadata.
+
+```python
+import torch
+
+# Forward pass — no gradients needed for inference
+with torch.no_grad():
+    prediction = model(batch).squeeze(0).softmax(0)
+
+# Highest-probability class
+class_id = prediction.argmax().item()
+score = prediction[class_id].item()
+
+# Class name is stored directly in the weights metadata
+category_name = weights.meta["categories"][class_id]
+print(f"{category_name}: {100 * score:.1f}%")
+# e.g. "golden retriever: 96.5%"
+```
+
+The full weights metadata dictionary also contains useful fields like `recipe` (a link to the training configuration) and `acc@1` / `acc@5` (top-1 and top-5 ImageNet accuracies):
+
+```python
+print(weights.meta["acc@1"])   # e.g. 80.858
+print(weights.meta["recipe"])  # URL to training recipe
+```
+
+### Object Detection with Faster R-CNN
+
+The same pattern — load weights, derive transforms, run inference — applies to every model family in TorchVision. Here is a complete object detection example using Faster R-CNN with a ResNet-50 FPN backbone:
+
+```python
+from torchvision.models.detection import fasterrcnn_resnet50_fpn, FasterRCNN_ResNet50_FPN_Weights
+from torchvision.io import read_image
+
+# Load model with best available COCO weights
+weights = FasterRCNN_ResNet50_FPN_Weights.DEFAULT
+model = fasterrcnn_resnet50_fpn(weights=weights)
+model.eval()
+
+# Preprocessing for detection models returns a list of float tensors
+preprocess = weights.transforms()
+
+img = read_image("path/to/image.jpg")
+batch = [preprocess(img)]
+
+with torch.no_grad():
+    predictions = model(batch)
+
+# predictions is a list of dicts, one per image
+boxes  = predictions[0]["boxes"]   # FloatTensor[N, 4] in [x1, y1, x2, y2] format
+labels = predictions[0]["labels"]  # Int64Tensor[N]
+scores = predictions[0]["scores"]  # FloatTensor[N]
+
+# Filter to high-confidence detections
+keep = scores > 0.8
+print(f"Detected {keep.sum().item()} objects with score > 0.8")
+
+# Map label IDs to COCO category names
+categories = weights.meta["categories"]
+for box, label, score in zip(boxes[keep], labels[keep], scores[keep]):
+    print(f"  {categories[label]}: {score:.2f}  box={box.tolist()}")
+```
+
+<Note>
+  Detection model outputs are **not** normalized probabilities. The `scores` field already represents confidence values in `[0, 1]`. Unlike classification, you do **not** apply softmax to detection outputs.
+</Note>
+
+</Steps>
+
+## Next Steps
+
+Now that you have run your first predictions, explore the rest of TorchVision to go deeper:
+
+<CardGroup cols={2}>
+  <Card title="Models Overview" icon="brain" href="/models/overview">
+    Browse all available architectures and learn how to fine-tune pre-trained models on custom datasets.
+  </Card>
+  <Card title="Transforms Overview" icon="wand-magic-sparkles" href="/transforms/overview">
+    Master the v2 transforms API and TVTensors for consistent augmentation across images, masks, and bounding boxes.
+  </Card>
+</CardGroup>

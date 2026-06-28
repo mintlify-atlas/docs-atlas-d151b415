@@ -1,0 +1,723 @@
+---
+title: "Image and Video I/O in TorchVision"
+sidebarTitle: "I/O"
+description: "Read, decode, encode, and write images and video files as PyTorch tensors using torchvision.io — with JPEG, PNG, GIF, WEBP, AVIF, and HEIC support."
+---
+
+The `torchvision.io` module is TorchVision's primary interface for loading and saving image and video data directly as PyTorch tensors. Rather than passing through NumPy arrays or PIL Image objects, these functions decode files straight into `uint8` tensors in `CHW` layout, making them ready for transforms and model inference with zero extra conversion overhead. JPEG decoding also supports CUDA acceleration via nvjpeg.
+
+<Warning>
+  Video decoding and encoding capabilities in `torchvision.io` are **deprecated since v0.22** and will be removed in v0.24. For video I/O going forward, use [TorchCodec](https://github.com/pytorch/torchcodec), which consolidates PyTorch's future video support.
+</Warning>
+
+---
+
+## ImageReadMode
+
+`ImageReadMode` is an enum that controls the colour-space conversion applied during decoding. You can pass either the enum member or its string name to any `mode` parameter.
+
+```python
+from torchvision.io import ImageReadMode
+
+# All available modes
+ImageReadMode.UNCHANGED   # load as-is (default)
+ImageReadMode.GRAY        # convert to single-channel grayscale
+ImageReadMode.GRAY_ALPHA  # grayscale + alpha channel
+ImageReadMode.RGB         # convert to 3-channel RGB
+ImageReadMode.RGB_ALPHA   # RGB + alpha channel (also: ImageReadMode.RGBA)
+```
+
+<Note>
+  `GRAY` and `GRAY_ALPHA` are only supported for JPEG and PNG images. Passing `mode="RGB"` as a plain string is equivalent to `mode=ImageReadMode.RGB`.
+</Note>
+
+| Member | Value | Description |
+|--------|-------|-------------|
+| `UNCHANGED` | `0` | Preserve the native colour space of the file |
+| `GRAY` | `1` | Force single-channel grayscale output |
+| `GRAY_ALPHA` | `2` | Grayscale with an alpha channel |
+| `RGB` | `3` | Force 3-channel RGB output |
+| `RGB_ALPHA` / `RGBA` | `4` | RGB with an alpha channel |
+
+---
+
+## Image Decoding
+
+### decode_image
+
+```python
+torchvision.io.decode_image(
+    input: Tensor | str,
+    mode: ImageReadMode = ImageReadMode.UNCHANGED,
+    apply_exif_orientation: bool = False,
+) -> Tensor
+```
+
+The main entry-point for image decoding. Accepts either a file path string or a 1-D `uint8` tensor of raw encoded bytes. Automatically detects the format (JPEG, PNG, GIF, WEBP) and dispatches to the appropriate decoder.
+
+<Note>
+  `decode_image()` does **not** support AVIF or HEIC yet — use `decode_avif()` / `decode_heic()` directly for those formats.
+</Note>
+
+<ParamField path="input" type="Tensor[1] | str | pathlib.Path" required>
+  Either a one-dimensional `uint8` tensor containing raw encoded bytes, or a path to the image file on disk.
+</ParamField>
+
+<ParamField path="mode" type="str | ImageReadMode" default="ImageReadMode.UNCHANGED">
+  Colour-space conversion to apply during decoding. Accepts string names, e.g. `"RGB"`. See [`ImageReadMode`](#imagereadmode).
+</ParamField>
+
+<ParamField path="apply_exif_orientation" type="bool" default="False">
+  Apply the EXIF orientation tag to automatically rotate/flip the output tensor. Supported for JPEG and PNG only.
+</ParamField>
+
+**Returns** `Tensor[C, H, W]` — `uint8` for 8-bit images, `uint16` for 16-bit PNGs.
+
+```python
+from torchvision.io import decode_image, ImageReadMode
+
+# Decode from a file path
+img = decode_image("photo.jpg")              # Tensor[C, H, W] uint8
+img_rgb = decode_image("photo.jpg", mode=ImageReadMode.RGB)   # always 3 channels
+img_str = decode_image("photo.jpg", mode="RGB")               # string mode works too
+
+# Decode from raw bytes already in memory
+raw = read_file("photo.jpg")                # 1-D uint8 tensor
+img = decode_image(raw, mode="RGB")
+```
+
+---
+
+### read_image
+
+```python
+torchvision.io.read_image(
+    path: str,
+    mode: ImageReadMode = ImageReadMode.UNCHANGED,
+    apply_exif_orientation: bool = False,
+) -> Tensor
+```
+
+<Warning>
+  **Obsolete.** `read_image()` is a thin wrapper around `read_file()` + `decode_image()` and is kept only for backwards compatibility. Prefer `decode_image(path, ...)` in new code.
+</Warning>
+
+<ParamField path="path" type="str | pathlib.Path" required>
+  Path to the image file to read.
+</ParamField>
+
+<ParamField path="mode" type="str | ImageReadMode" default="ImageReadMode.UNCHANGED">
+  Colour-space conversion mode. See [`ImageReadMode`](#imagereadmode).
+</ParamField>
+
+<ParamField path="apply_exif_orientation" type="bool" default="False">
+  Apply EXIF orientation transformation.
+</ParamField>
+
+**Returns** `Tensor[C, H, W]` `uint8`.
+
+---
+
+### decode_jpeg
+
+```python
+torchvision.io.decode_jpeg(
+    input: Tensor | list[Tensor],
+    mode: ImageReadMode = ImageReadMode.UNCHANGED,
+    device: str | torch.device = "cpu",
+    apply_exif_orientation: bool = False,
+) -> Tensor | list[Tensor]
+```
+
+Decode one or more JPEG images on CPU or CUDA. When a CUDA device is specified, images are decoded with [nvjpeg](https://developer.nvidia.com/nvjpeg), requiring CUDA ≥ 10.1.
+
+<ParamField path="input" type="Tensor[1] | list[Tensor[1]]" required>
+  A 1-D `uint8` CPU tensor of raw JPEG bytes, or a list of such tensors. All input tensors must reside on CPU even when decoding to CUDA.
+</ParamField>
+
+<ParamField path="mode" type="str | ImageReadMode" default="ImageReadMode.UNCHANGED">
+  Colour-space conversion mode.
+</ParamField>
+
+<ParamField path="device" type="str | torch.device" default='"cpu"'>
+  Device for the output tensor. When `"cuda"`, nvjpeg is used for hardware-accelerated decoding. Requires CUDA ≥ 11.6 to avoid a memory leak in nvjpeg.
+</ParamField>
+
+<ParamField path="apply_exif_orientation" type="bool" default="False">
+  Apply EXIF orientation (CPU only).
+</ParamField>
+
+**Returns** `Tensor[C, H, W]` or `list[Tensor[C, H, W]]` — `uint8` values in `[0, 255]`, on the requested device.
+
+<Tip>
+  Passing a **list** of tensors to `decode_jpeg()` when targeting CUDA is significantly more efficient than repeated scalar calls, because a single CUDA kernel handles the full batch.
+</Tip>
+
+```python
+from torchvision.io import read_file, decode_jpeg
+
+raw = read_file("photo.jpg")
+
+# CPU decode
+img_cpu = decode_jpeg(raw, mode="RGB")
+
+# GPU batch decode (more efficient than calling one-by-one)
+raws = [read_file(p) for p in ["a.jpg", "b.jpg", "c.jpg"]]
+imgs = decode_jpeg(raws, mode="RGB", device="cuda")
+```
+
+---
+
+### decode_png
+
+```python
+torchvision.io.decode_png(
+    input: Tensor,
+    mode: ImageReadMode = ImageReadMode.UNCHANGED,
+    apply_exif_orientation: bool = False,
+) -> Tensor
+```
+
+Decode a PNG image from raw bytes into a CHW tensor.
+
+<ParamField path="input" type="Tensor[1]" required>
+  1-D `uint8` tensor containing the raw bytes of the PNG file.
+</ParamField>
+
+<ParamField path="mode" type="str | ImageReadMode" default="ImageReadMode.UNCHANGED">
+  Colour-space conversion mode.
+</ParamField>
+
+<ParamField path="apply_exif_orientation" type="bool" default="False">
+  Apply EXIF orientation transformation.
+</ParamField>
+
+**Returns** `Tensor[C, H, W]` — `uint8` for 8-bit PNGs, `uint16` for 16-bit PNGs.
+
+<Note>
+  For 16-bit PNG output, call `torchvision.transforms.v2.functional.to_dtype(img, scale=True)` to convert to `uint8` or `float32`.
+</Note>
+
+---
+
+### decode_gif
+
+```python
+torchvision.io.decode_gif(input: Tensor) -> Tensor
+```
+
+Decode a GIF image from raw bytes.
+
+<ParamField path="input" type="Tensor[1]" required>
+  1-D contiguous `uint8` tensor of raw GIF bytes.
+</ParamField>
+
+**Returns**
+- `Tensor[C, H, W]` if the GIF contains a single frame.
+- `Tensor[N, C, H, W]` if the GIF contains `N` frames (animated).
+
+Values are `uint8` in `[0, 255]`.
+
+---
+
+### decode_webp
+
+```python
+torchvision.io.decode_webp(
+    input: Tensor,
+    mode: ImageReadMode = ImageReadMode.UNCHANGED,
+) -> Tensor
+```
+
+Decode a WebP image from raw bytes.
+
+<ParamField path="input" type="Tensor[1]" required>
+  1-D contiguous `uint8` tensor of raw WebP bytes.
+</ParamField>
+
+<ParamField path="mode" type="str | ImageReadMode" default="ImageReadMode.UNCHANGED">
+  Colour-space conversion mode. Use `"RGB"` or `"RGB_ALPHA"` for explicit channel count.
+</ParamField>
+
+**Returns** `Tensor[C, H, W]` `uint8`.
+
+---
+
+### decode_avif
+
+```python
+torchvision.io.decode_avif(
+    input: Tensor,
+    mode: ImageReadMode = ImageReadMode.UNCHANGED,
+) -> Tensor
+```
+
+Decode an AVIF image from raw bytes.
+
+<Warning>
+  Requires the separate `torchvision-extra-decoders` package (`pip install torchvision-extra-decoders`). Currently **Linux only** and in **BETA**. Released under the LGPL license.
+</Warning>
+
+<ParamField path="input" type="Tensor[1]" required>
+  1-D contiguous `uint8` tensor of raw AVIF bytes.
+</ParamField>
+
+<ParamField path="mode" type="str | ImageReadMode" default="ImageReadMode.UNCHANGED">
+  Colour-space conversion mode.
+</ParamField>
+
+**Returns** `Tensor[C, H, W]` — `uint8` for 8-bit images, `uint16` for higher bit-depth.
+
+---
+
+### decode_heic
+
+```python
+torchvision.io.decode_heic(
+    input: Tensor,
+    mode: ImageReadMode = ImageReadMode.UNCHANGED,
+) -> Tensor
+```
+
+Decode an HEIC image from raw bytes.
+
+<Warning>
+  Requires `pip install torchvision-extra-decoders`. Currently **Linux only** and in **BETA**. Released under the LGPL license.
+</Warning>
+
+<ParamField path="input" type="Tensor[1]" required>
+  1-D contiguous `uint8` tensor of raw HEIC bytes.
+</ParamField>
+
+<ParamField path="mode" type="str | ImageReadMode" default="ImageReadMode.UNCHANGED">
+  Colour-space conversion mode.
+</ParamField>
+
+**Returns** `Tensor[C, H, W]` — `uint8` for 8-bit, `uint16` for higher bit-depth.
+
+---
+
+## Image Encoding
+
+### encode_jpeg
+
+```python
+torchvision.io.encode_jpeg(
+    input: Tensor | list[Tensor],
+    quality: int = 75,
+) -> Tensor | list[Tensor]
+```
+
+Encode a CHW image tensor (or a list thereof) into raw JPEG bytes. Supports both CPU and CUDA tensors.
+
+<ParamField path="input" type="Tensor[C, H, W] | list[Tensor[C, H, W]]" required>
+  A `uint8` image tensor with `C = 1` (grayscale) or `C = 3` (RGB), or a list of such tensors. CUDA tensors are encoded with a CUDA-native encoder.
+</ParamField>
+
+<ParamField path="quality" type="int" default="75">
+  JPEG quality factor, `1` (smallest file) to `100` (best quality).
+</ParamField>
+
+**Returns** `Tensor[1]` or `list[Tensor[1]]` — 1-D `uint8` tensor(s) of raw JPEG bytes.
+
+```python
+from torchvision.io import decode_image, encode_jpeg
+
+img = decode_image("photo.jpg", mode="RGB")  # Tensor[3, H, W] uint8
+encoded = encode_jpeg(img, quality=90)       # Tensor[1] of raw bytes
+```
+
+---
+
+### write_jpeg
+
+```python
+torchvision.io.write_jpeg(
+    input: Tensor,
+    filename: str,
+    quality: int = 75,
+)
+```
+
+Encode an image tensor as JPEG and save it to disk (equivalent to `write_file(filename, encode_jpeg(input, quality))`).
+
+<ParamField path="input" type="Tensor[C, H, W]" required>
+  `uint8` image tensor with `C = 1` or `C = 3`.
+</ParamField>
+
+<ParamField path="filename" type="str | pathlib.Path" required>
+  Destination file path.
+</ParamField>
+
+<ParamField path="quality" type="int" default="75">
+  JPEG quality factor, `1`–`100`.
+</ParamField>
+
+---
+
+### encode_png
+
+```python
+torchvision.io.encode_png(
+    input: Tensor,
+    compression_level: int = 6,
+) -> Tensor
+```
+
+Encode a CHW image tensor into raw PNG bytes.
+
+<ParamField path="input" type="Tensor[C, H, W]" required>
+  `uint8` image tensor with `C = 1` or `C = 3`.
+</ParamField>
+
+<ParamField path="compression_level" type="int" default="6">
+  zlib compression level, `0` (no compression, largest file) to `9` (maximum compression).
+</ParamField>
+
+**Returns** `Tensor[1]` — 1-D `uint8` tensor of raw PNG bytes.
+
+---
+
+### write_png
+
+```python
+torchvision.io.write_png(
+    input: Tensor,
+    filename: str,
+    compression_level: int = 6,
+)
+```
+
+Encode an image tensor as PNG and save it to disk.
+
+<ParamField path="input" type="Tensor[C, H, W]" required>
+  `uint8` image tensor with `C = 1` or `C = 3`.
+</ParamField>
+
+<ParamField path="filename" type="str | pathlib.Path" required>
+  Destination file path.
+</ParamField>
+
+<ParamField path="compression_level" type="int" default="6">
+  zlib compression level, `0`–`9`.
+</ParamField>
+
+---
+
+## File I/O
+
+### read_file
+
+```python
+torchvision.io.read_file(path: str) -> Tensor
+```
+
+Read the raw bytes of any file into a 1-D `uint8` tensor. Useful for loading encoded image bytes before passing them to a format-specific decoder.
+
+<ParamField path="path" type="str | pathlib.Path" required>
+  Path to the file to read.
+</ParamField>
+
+**Returns** `Tensor` — 1-D `uint8` tensor of the file's raw bytes.
+
+```python
+from torchvision.io import read_file, decode_jpeg
+
+raw = read_file("photo.jpg")  # Tensor[N] uint8
+img = decode_jpeg(raw, mode="RGB")
+```
+
+---
+
+### write_file
+
+```python
+torchvision.io.write_file(filename: str, data: Tensor) -> None
+```
+
+Write the contents of a 1-D `uint8` tensor to a file on disk.
+
+<ParamField path="filename" type="str | pathlib.Path" required>
+  Destination file path.
+</ParamField>
+
+<ParamField path="data" type="Tensor" required>
+  1-D `uint8` tensor of bytes to write.
+</ParamField>
+
+---
+
+## Complete Image I/O Example
+
+<CodeGroup>
+
+```python Read & convert
+from torchvision.io import decode_image, ImageReadMode
+
+# Auto-detect format, load as RGB
+img = decode_image("photo.jpg", mode=ImageReadMode.RGB)
+print(img.shape, img.dtype)  # torch.Size([3, H, W]) torch.uint8
+
+# Load a PNG with transparency
+img_rgba = decode_image("logo.png", mode="RGB_ALPHA")
+print(img_rgba.shape)  # torch.Size([4, H, W])
+
+# Load a 16-bit PNG and convert to float
+from torchvision.transforms.v2.functional import to_dtype
+raw_16 = decode_image("depth.png")  # uint16
+img_f = to_dtype(raw_16, scale=True)  # float32 in [0, 1]
+```
+
+```python Encode & save
+from torchvision.io import decode_image, encode_jpeg, write_jpeg, write_png
+
+img = decode_image("photo.jpg", mode="RGB")  # uint8 Tensor[3, H, W]
+
+# Encode to JPEG bytes in memory
+jpeg_bytes = encode_jpeg(img, quality=90)
+
+# Write directly to disk
+write_jpeg(img, "output.jpg", quality=90)
+write_png(img, "output.png", compression_level=6)
+```
+
+```python GPU batch decode
+from torchvision.io import read_file, decode_jpeg
+
+paths = ["a.jpg", "b.jpg", "c.jpg"]
+raws = [read_file(p) for p in paths]
+
+# Batched CUDA decode — much faster than one-by-one
+imgs = decode_jpeg(raws, mode="RGB", device="cuda")
+# imgs is a list of Tensor[3, H, W] on CUDA
+```
+
+</CodeGroup>
+
+---
+
+## Video I/O
+
+<Warning>
+  Video I/O in `torchvision.io` is **deprecated since v0.22** and will be removed in **v0.24**. Migrate to [TorchCodec](https://github.com/pytorch/torchcodec) for all new video-processing work.
+</Warning>
+
+### read_video
+
+```python
+torchvision.io.read_video(
+    filename: str,
+    start_pts: int | float = 0,
+    end_pts: int | float | None = None,
+    pts_unit: str = "pts",
+    output_format: str = "THWC",
+) -> tuple[Tensor, Tensor, dict]
+```
+
+Decode video frames and audio samples from a file into tensors.
+
+<ParamField path="filename" type="str" required>
+  Path to the video file to read.
+</ParamField>
+
+<ParamField path="start_pts" type="int | float" default="0">
+  Start presentation timestamp. Interpreted as raw PTS ticks when `pts_unit="pts"`, or seconds when `pts_unit="sec"`.
+</ParamField>
+
+<ParamField path="end_pts" type="int | float | None" default="None">
+  End presentation timestamp (inclusive). `None` reads to the end of the stream.
+</ParamField>
+
+<ParamField path="pts_unit" type="str" default='"pts"'>
+  Unit for `start_pts` / `end_pts`. Either `"pts"` (raw ticks) or `"sec"` (seconds).
+</ParamField>
+
+<ParamField path="output_format" type="str" default='"THWC"'>
+  Layout of the returned video tensor. `"THWC"` (Time × Height × Width × Channels, default) or `"TCHW"`.
+</ParamField>
+
+**Returns** a 3-tuple:
+- `vframes` — `Tensor[T, H, W, C]` (or `[T, C, H, W]` for `"TCHW"`) `uint8` video frames.
+- `aframes` — `Tensor[K, L]` `float32` audio samples (`K` channels, `L` samples).
+- `info` — `dict` with keys `video_fps` (`float`) and `audio_fps` (`int`).
+
+```python
+from torchvision.io import read_video
+
+# Read full video in seconds
+vframes, aframes, info = read_video("clip.mp4", pts_unit="sec")
+print(vframes.shape)   # Tensor[T, H, W, 3]
+print(info)            # {'video_fps': 30.0, 'audio_fps': 44100}
+
+# Read a specific time window
+vframes, aframes, info = read_video(
+    "clip.mp4",
+    start_pts=2.0,
+    end_pts=5.0,
+    pts_unit="sec",
+    output_format="TCHW",
+)
+print(vframes.shape)   # Tensor[T, 3, H, W]
+```
+
+---
+
+### read_video_timestamps
+
+```python
+torchvision.io.read_video_timestamps(
+    filename: str,
+    pts_unit: str = "pts",
+) -> tuple[list[int | float], float | None]
+```
+
+Retrieve all available presentation timestamps for a video without decoding frames — useful for seeking or building a frame index.
+
+<ParamField path="filename" type="str" required>
+  Path to the video file.
+</ParamField>
+
+<ParamField path="pts_unit" type="str" default='"pts"'>
+  `"pts"` returns raw integer ticks; `"sec"` returns timestamps in seconds.
+</ParamField>
+
+**Returns** a 2-tuple:
+- `pts` — sorted list of presentation timestamps.
+- `video_fps` — frames per second as a `float`, or `None` if unavailable.
+
+```python
+from torchvision.io import read_video_timestamps
+
+pts, fps = read_video_timestamps("clip.mp4", pts_unit="sec")
+print(f"Total frames: {len(pts)}, FPS: {fps}")
+print(f"Duration: {pts[-1]:.2f}s")
+```
+
+---
+
+### write_video
+
+```python
+torchvision.io.write_video(
+    filename: str,
+    video_array: Tensor,
+    fps: float,
+    video_codec: str = "libx264",
+    options: dict | None = None,
+    audio_array: Tensor | None = None,
+    audio_fps: int | None = None,
+    audio_codec: str | None = None,
+    audio_options: dict | None = None,
+)
+```
+
+Encode a video tensor and optionally interleave audio, writing the result to a file. Requires PyAV (`pip install av`).
+
+<ParamField path="filename" type="str" required>
+  Destination file path (format inferred from extension, e.g. `.mp4`, `.mkv`).
+</ParamField>
+
+<ParamField path="video_array" type="Tensor[T, H, W, C]" required>
+  `uint8` tensor of video frames in THWC layout (`C = 3` for RGB).
+</ParamField>
+
+<ParamField path="fps" type="float" required>
+  Output frame rate.
+</ParamField>
+
+<ParamField path="video_codec" type="str" default='"libx264"'>
+  FFmpeg video codec identifier, e.g. `"libx264"`, `"libx265"`, `"mpeg4"`.
+</ParamField>
+
+<ParamField path="options" type="dict | None" default="None">
+  Additional FFmpeg encoder options passed as key-value strings (e.g. `{"crf": "18"}`).
+</ParamField>
+
+<ParamField path="audio_array" type="Tensor | None" default="None">
+  Optional audio samples as a `float32` tensor of shape `[K, L]` (channels × samples).
+</ParamField>
+
+<ParamField path="audio_fps" type="int | None" default="None">
+  Audio sample rate in Hz (required when `audio_array` is provided).
+</ParamField>
+
+<ParamField path="audio_codec" type="str | None" default="None">
+  FFmpeg audio codec, e.g. `"aac"`, `"mp3"`.
+</ParamField>
+
+<ParamField path="audio_options" type="dict | None" default="None">
+  Additional FFmpeg audio encoder options.
+</ParamField>
+
+```python
+from torchvision.io import read_video, write_video
+
+vframes, aframes, info = read_video("input.mp4", pts_unit="sec")
+
+# Write the first 90 frames as a new clip
+write_video(
+    "output.mp4",
+    vframes[:90],          # Tensor[90, H, W, 3]
+    fps=info["video_fps"],
+    video_codec="libx264",
+    options={"crf": "18"},
+)
+```
+
+---
+
+### VideoReader
+
+`VideoReader` is a low-level, frame-by-frame streaming class built on PyAV. It supports fine-grained seeking and is suited for datasets that sample random frames without loading the entire file into memory.
+
+<Warning>
+  `VideoReader` is part of the deprecated video I/O stack (deprecated v0.22, removal planned v0.24). Migrate to [TorchCodec](https://github.com/pytorch/torchcodec) for new projects.
+</Warning>
+
+```python
+from torchvision.io import VideoReader
+
+reader = VideoReader("clip.mp4", stream="video")
+
+# Seek to a timestamp (seconds) and iterate frames
+reader.seek(2.5)
+for frame in reader:
+    # frame is a dict: {"data": Tensor[C, H, W], "pts": float}
+    print(frame["pts"], frame["data"].shape)
+    if frame["pts"] > 5.0:
+        break
+```
+
+---
+
+## Backend Control
+
+TorchVision exposes functions at the top-level `torchvision` namespace to switch the underlying libraries used for image and video loading.
+
+### Image Backend
+
+```python
+import torchvision
+
+torchvision.set_image_backend("PIL")       # default
+torchvision.set_image_backend("accimage")  # Intel IPP-based, faster but fewer ops
+
+backend = torchvision.get_image_backend()  # -> "PIL" or "accimage"
+```
+
+<ParamField path="backend" type="str" required>
+  `"PIL"` (default, full-featured) or `"accimage"` (Intel IPP library, generally faster but supports fewer operations).
+</ParamField>
+
+### Video Backend
+
+```python
+import torchvision
+
+torchvision.set_video_backend("pyav")  # only supported backend
+backend = torchvision.get_video_backend()  # -> "pyav"
+```
+
+<Note>
+  `"pyav"` is the only supported video backend. `set_video_backend()` currently has no effect and exists for API compatibility.
+</Note>

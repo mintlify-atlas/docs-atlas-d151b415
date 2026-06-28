@@ -1,0 +1,255 @@
+---
+title: "Using Transforms v2 with Bounding Boxes and Masks"
+sidebarTitle: "V2 Guide"
+description: "Step-by-step guide to using torchvision.transforms.v2 with TVTensors for object detection, segmentation, and multi-modality augmentation."
+---
+
+The transforms v2 API was designed from the ground up to handle the full range of computer vision tasks, not just image classification. By wrapping your tensors in typed `TVTensor` subclasses, you give every transform the context it needs to augment images, bounding boxes, segmentation masks, keypoints, and videos correctly and consistently within a single pipeline call. This guide walks through the essential concepts for working with detection and segmentation data using `torchvision.transforms.v2`.
+
+## TVTensors
+
+TVTensors are `torch.Tensor` subclasses that annotate data with its semantic type. Transforms in v2 inspect these types at runtime and dispatch the appropriate transformation logic — a `RandomHorizontalFlip` will mirror pixel data for images but mirror coordinate values for bounding boxes, all from the same `transform(img, boxes)` call.
+
+All TVTensor types are exported from `torchvision.tv_tensors`:
+
+<CardGroup cols={2}>
+  <Card title="Image" icon="image">
+    Shape `[..., C, H, W]`. Created from a tensor, PIL image, or ndarray. Values are not rescaled on construction.
+  </Card>
+  <Card title="BoundingBoxes" icon="vector-square">
+    Shape `[N, 4]`. Requires a `format` (axis-aligned: `XYXY`, `XYWH`, `CXCYWH`; rotated: `XYWHR`, `CXCYWHR`, `XYXYXYXY`) and `canvas_size (H, W)`.
+  </Card>
+  <Card title="Mask" icon="draw-polygon">
+    Shape `[..., H, W]`. Used for both semantic segmentation masks and per-instance binary masks.
+  </Card>
+  <Card title="KeyPoints" icon="crosshairs">
+    Shape `[..., 2]` (x, y per point). Requires `canvas_size`. Supports polygons, skeletons, and polylines.
+  </Card>
+  <Card title="Video" icon="film">
+    Shape `[T, C, H, W]`. Spatial transforms are applied frame-by-frame with identical parameters.
+  </Card>
+</CardGroup>
+
+### Wrapping tensors as TVTensors
+
+Construct TVTensors from any tensor-like data. `BoundingBoxes` additionally requires a coordinate `format` and the `canvas_size` of the corresponding image:
+
+```python
+import torch
+from torchvision.tv_tensors import (
+    Image,
+    BoundingBoxes,
+    BoundingBoxFormat,
+    Mask,
+    KeyPoints,
+)
+
+# Image: shape [C, H, W]
+image = Image(torch.randint(0, 256, (3, 480, 640), dtype=torch.uint8))
+
+# Bounding boxes in XYXY format; canvas_size is (height, width)
+boxes = BoundingBoxes(
+    [[10, 20, 100, 150], [200, 50, 400, 300]],
+    format=BoundingBoxFormat.XYXY,
+    canvas_size=(480, 640),
+)
+
+# Segmentation mask: shape [H, W]
+mask = Mask(torch.zeros(480, 640, dtype=torch.uint8))
+
+# KeyPoints: shape [N, 2] — each row is (x, y)
+keypoints = KeyPoints(
+    [[50.0, 80.0], [120.0, 200.0]],
+    canvas_size=(480, 640),
+)
+```
+
+<Note>
+  TVTensors are thin wrappers — they carry zero overhead beyond the attached
+  metadata attributes. All standard `torch.Tensor` operations work on them
+  unchanged.
+</Note>
+
+## Transforms on Detection Data
+
+Once your tensors are wrapped, pass them together to any v2 transform. The same spatial parameters (crop coordinates, flip decision, rotation angle, etc.) are applied consistently across all inputs:
+
+```python
+import torch
+import torchvision.transforms.v2 as T
+from torchvision.tv_tensors import BoundingBoxes, BoundingBoxFormat
+
+transform = T.Compose([
+    T.RandomHorizontalFlip(p=0.5),
+    T.RandomCrop(size=[224, 224]),
+])
+
+image = torch.randint(0, 256, size=(3, 256, 256), dtype=torch.uint8)
+boxes = BoundingBoxes(
+    [[10, 20, 100, 150], [50, 60, 200, 220]],
+    format=BoundingBoxFormat.XYXY,
+    canvas_size=(256, 256),
+)
+
+out_image, out_boxes = transform(image, boxes)
+```
+
+You can pass an **arbitrary input structure** — a dict, list, or nested combination — and the transform will traverse it, updating every TVTensor it finds while leaving other values untouched:
+
+```python
+sample = {
+    "image": image,
+    "annotations": {
+        "boxes": boxes,
+        "mask": mask,
+    },
+    "image_id": 42,  # plain int, passed through unchanged
+}
+
+transformed_sample = transform(sample)
+```
+
+### BoundingBoxFormat options
+
+| Format | Description |
+|--------|-------------|
+| `XYXY` | Top-left corner `(x1, y1)` and bottom-right corner `(x2, y2)`. |
+| `XYWH` | Top-left corner `(x1, y1)`, width `w`, and height `h`. |
+| `CXCYWH` | Center `(cx, cy)`, width `w`, and height `h`. |
+| `XYWHR` | Top-left `(x1, y1)`, width, height, and rotation angle (degrees). Rotated box. |
+| `CXCYWHR` | Center `(cx, cy)`, width, height, and rotation angle. Rotated box. |
+| `XYXYXYXY` | All four corners in order: top-left, top-right, bottom-right, bottom-left. Rotated box. |
+
+Convert between formats at any time with `ConvertBoundingBoxFormat`:
+
+```python
+import torchvision.transforms.v2 as T
+
+to_cxcywh = T.ConvertBoundingBoxFormat(T.BoundingBoxFormat.CXCYWH)
+boxes_cxcywh = to_cxcywh(boxes)
+```
+
+## Wrapping Existing Datasets
+
+For popular built-in TorchVision datasets, the `wrap_dataset_for_transforms_v2` utility automatically converts raw dataset outputs into the appropriate TVTensor types:
+
+```python
+import torchvision
+from torchvision.datasets import wrap_dataset_for_transforms_v2
+import torchvision.transforms.v2 as T
+
+# Raw CocoDetection returns list-of-dicts for targets
+dataset = torchvision.datasets.CocoDetection(
+    root="/data/coco/train2017",
+    annFile="/data/coco/annotations/instances_train2017.json",
+)
+
+# After wrapping, targets contain BoundingBoxes and Mask TVTensors
+dataset = wrap_dataset_for_transforms_v2(dataset)
+
+transform = T.Compose([
+    T.RandomResizedCrop(640, antialias=True),
+    T.RandomHorizontalFlip(p=0.5),
+    T.ToDtype(torch.float32, scale=True),
+])
+
+dataset.transforms = transform
+```
+
+<Info>
+  `wrap_dataset_for_transforms_v2` supports `CocoDetection`, `VOCDetection`,
+  `VOCSegmentation`, `CelebA`, `Kitti`, `OxfordIIITPet`, `Cityscapes`,
+  `WIDERFace`, and video classification datasets like `Kinetics`. Image
+  classification datasets (e.g., `ImageNet`) are a no-op — they already work
+  with v2 out of the box.
+</Info>
+
+## The `set_return_type` Context Manager
+
+By default, torch operations on TVTensors return plain `torch.Tensor` objects (the type annotation is stripped). Use `set_return_type` to preserve the TVTensor subclass through standard torch ops:
+
+```python
+from torchvision.tv_tensors import Image, set_return_type
+import torch
+
+img = Image(torch.rand(3, 64, 64))
+
+# Default behaviour: returns a plain Tensor
+result = img + 0.1
+print(type(result))  # <class 'torch.Tensor'>
+
+# Context manager: preserves the Image subclass
+with set_return_type("TVTensor"):
+    result = img + 0.1
+    print(type(result))  # <class 'torchvision.tv_tensors._image.Image'>
+
+# Or set globally for the entire program
+set_return_type("TVTensor")
+```
+
+<Warning>
+  When using `set_return_type("TVTensor")`, add `ToPureTensor()` at the end of
+  your pipeline before feeding data to your model. This removes the
+  `__torch_function__` overhead that TVTensors introduce and avoids unnecessary
+  graph breaks in `torch.compile`.
+</Warning>
+
+## Migrating from V1 to V2
+
+<Steps>
+  <Step title="Update the import">
+    Replace `import torchvision.transforms as T` with `import torchvision.transforms.v2 as T`. For most image classification pipelines, this is the only change required.
+  </Step>
+  <Step title="Replace ToTensor with ToImage + ToDtype">
+    `ToTensor()` is **deprecated** in v2 because it silently rescales values from `[0, 255]` to `[0.0, 1.0]` and changes the dtype in a single opaque step.
+
+    Use the explicit two-step replacement instead:
+
+    ```python
+    # v1 — deprecated in v2
+    transform = T.Compose([
+        T.Resize(256),
+        T.ToTensor(),                  # uint8 [0,255] → float32 [0,1]
+        T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+    ])
+
+    # v2 — recommended
+    transform = T.Compose([
+        T.Resize(256, antialias=True),
+        T.ToImage(),                   # PIL / ndarray → tv_tensors.Image (uint8)
+        T.ToDtype(torch.float32, scale=True),  # uint8 [0,255] → float32 [0,1]
+        T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+    ])
+    ```
+  </Step>
+  <Step title="Wrap multi-modal data">
+    If your dataset returns bounding boxes or masks alongside images, wrap them in the appropriate TVTensor types (or use `wrap_dataset_for_transforms_v2`). Pass all modalities as separate arguments to the transform.
+  </Step>
+  <Step title="Pass antialias=True for resizing">
+    In v2, resize transforms emit a warning when `antialias` is not explicitly set. Pass `antialias=True` to silence it and get higher-quality downsampling.
+  </Step>
+</Steps>
+
+## Composing with `torch.nn.Sequential`
+
+For TorchScript-compatible pipelines, use `torch.nn.Sequential` instead of `Compose`. Only transforms that operate on `torch.Tensor` (no PIL, no lambda functions) are scriptable:
+
+```python
+import torch
+import torchvision.transforms.v2 as T
+
+scriptable_pipeline = torch.nn.Sequential(
+    T.Resize(256, antialias=True),
+    T.CenterCrop(224),
+    T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+)
+
+scripted = torch.jit.script(scriptable_pipeline)
+```
+
+<Tip>
+  `torch.nn.Sequential` works only when all transforms inherit from
+  `torch.nn.Module`. All built-in v2 transforms satisfy this requirement.
+  Custom transforms must also subclass `torch.nn.Module` (or the v2
+  `Transform` base class, which itself subclasses `Module`).
+</Tip>
