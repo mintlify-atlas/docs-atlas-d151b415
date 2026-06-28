@@ -1,7 +1,7 @@
 ---
 title: "The Weights API: Load Pretrained Models with Transforms"
 sidebarTitle: "Weights API"
-description: "Deep-dive into TorchVision's Multi-Weight Support API: WeightsEnum, bundled transforms, metadata, and string-based weight loading."
+description: "Deep-dive into TorchVision's Multi-Weight Support API: WeightsEnum, bundled preprocessing transforms, weight metadata, and config-driven weight loading."
 ---
 
 TorchVision's **Multi-Weight Support API**, introduced in v0.13, makes every pre-trained checkpoint a self-contained object that carries its download URL, the exact preprocessing pipeline used during training, and a rich metadata dictionary — all in one place. This means you can never accidentally mismatch a model checkpoint with the wrong image normalization parameters.

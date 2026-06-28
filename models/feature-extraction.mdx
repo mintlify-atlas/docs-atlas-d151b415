@@ -49,10 +49,12 @@ create_feature_extractor(
 
 | Argument | Type | Description |
 |----------|------|-------------|
-| `return_nodes` | `list[str]` or `dict[str, str]` | Node names to extract. If a `dict`, keys are node names and values are output keys. |
-| `train_return_nodes` | `dict` | Nodes to extract in train mode only (requires `eval_return_nodes` too). |
-| `eval_return_nodes` | `dict` | Nodes to extract in eval mode only (requires `train_return_nodes` too). |
-| `tracer_kwargs` | `dict` | Passed to `NodePathTracer` / `torch.fx.Tracer` for customising tracing behaviour. |
+| `return_nodes` | `list[str]` or `dict[str, str]` | Node names to extract. If a `dict`, keys are node names and values are output keys. Mutually exclusive with `train_return_nodes` / `eval_return_nodes`. |
+| `train_return_nodes` | `list[str]` or `dict[str, str]` | Nodes to extract in train mode only (requires `eval_return_nodes` too). |
+| `eval_return_nodes` | `list[str]` or `dict[str, str]` | Nodes to extract in eval mode only (requires `train_return_nodes` too). |
+| `tracer_kwargs` | `dict` | Passed to `NodePathTracer` / `torch.fx.Tracer` for customising tracing behaviour. User-supplied values are merged with TorchVision defaults. |
+| `suppress_diff_warning` | `bool` | Suppress the warning emitted when train and eval graphs differ. Default: `False`. |
+| `concrete_args` | `dict` | Concrete (non-proxy) arguments for `torch.fx.Tracer.trace`. API stability not guaranteed by PyTorch. |
 
 ---
 

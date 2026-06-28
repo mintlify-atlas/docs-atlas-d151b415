@@ -62,7 +62,7 @@ TVTensors are typed `torch.Tensor` subclasses that carry the metadata transforms
     Shape `[..., C, H, W]`. Interchangeable with a plain tensor inside transforms, but explicitly marks pixel data.
   </Card>
   <Card title="BoundingBoxes" icon="vector-square">
-    Shape `[N, 4]`. Requires `format` (`XYXY`, `XYWH`, or `CXCYWH`) and `canvas_size` (H, W).
+    Shape `[N, K]` where K=4 for axis-aligned boxes (`XYXY`, `XYWH`, `CXCYWH`) or K=5/8 for rotated boxes (`XYWHR`, `CXCYWHR`, `XYXYXYXY`). Requires `format` and `canvas_size` (H, W).
   </Card>
   <Card title="Mask" icon="draw-polygon">
     Shape `[..., H, W]`. Used for segmentation masks and binary detection masks.

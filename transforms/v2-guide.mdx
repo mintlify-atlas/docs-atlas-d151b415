@@ -124,8 +124,9 @@ Convert between formats at any time with `ConvertBoundingBoxFormat`:
 
 ```python
 import torchvision.transforms.v2 as T
+from torchvision.tv_tensors import BoundingBoxFormat
 
-to_cxcywh = T.ConvertBoundingBoxFormat(T.BoundingBoxFormat.CXCYWH)
+to_cxcywh = T.ConvertBoundingBoxFormat(BoundingBoxFormat.CXCYWH)
 boxes_cxcywh = to_cxcywh(boxes)
 ```
 

@@ -47,7 +47,7 @@ from torchvision.models import ResNet50_Weights
 
 # List every available weights entry for ResNet-50
 for w in ResNet50_Weights:
-    print(w, w.meta["acc@1"])
+    print(w, w.meta["_metrics"]["ImageNet-1K"]["acc@1"])
 ```
 
 ### Preprocess an Image Using `weights.transforms()`
@@ -95,8 +95,8 @@ print(f"{category_name}: {100 * score:.1f}%")
 The full weights metadata dictionary also contains useful fields like `recipe` (a link to the training configuration) and `acc@1` / `acc@5` (top-1 and top-5 ImageNet accuracies):
 
 ```python
-print(weights.meta["acc@1"])   # e.g. 80.858
-print(weights.meta["recipe"])  # URL to training recipe
+print(weights.meta["_metrics"]["ImageNet-1K"]["acc@1"])  # e.g. 80.858
+print(weights.meta["recipe"])                            # URL to training recipe
 ```
 
 ### Object Detection with Faster R-CNN

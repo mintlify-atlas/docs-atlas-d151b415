@@ -59,7 +59,7 @@ from torchvision.models import vit_b_16, ViT_B_16_Weights
 model = vit_b_16(weights=ViT_B_16_Weights.DEFAULT)
 model.heads.head = nn.Linear(model.heads.head.in_features, num_classes)
 
-# ConvNeXt / Swin use model.classifier[-1] or model.head
+# ConvNeXt uses model.classifier[2]; Swin Transformer uses model.head
 from torchvision.models import convnext_tiny, swin_t
 model = convnext_tiny(weights=None)
 model.classifier[2] = nn.Linear(model.classifier[2].in_features, num_classes)
@@ -237,7 +237,7 @@ model = efficientnet_b0(weights=EfficientNet_B0_Weights.IMAGENET1K_V1)
 model = efficientnet_v2_s(weights=EfficientNet_V2_S_Weights.IMAGENET1K_V1)
 ```
 
-The EfficientNet head is `model.classifier` — an `nn.Sequential` ending with `nn.Linear(in_features, num_classes)`.
+The EfficientNet head is a two-element `nn.Sequential`: `model.classifier[0]` is `nn.Dropout` and `model.classifier[1]` is the `nn.Linear(in_features, num_classes)` layer to replace for fine-tuning.
 
 #### MNASNet
 

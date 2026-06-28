@@ -1,7 +1,7 @@
 ---
-title: "Visualization Utilities for Computer Vision Tasks"
+title: "TorchVision Visualization Utilities: Drawing and Grids"
 sidebarTitle: "Visualization"
-description: "Draw bounding boxes, segmentation masks, keypoints, and optical flow on image tensors, and create image grids with torchvision.utils."
+description: "Draw bounding boxes, segmentation masks, keypoints, and optical flow on image tensors; create and save image grids with torchvision.utils."
 ---
 
 The `torchvision.utils` module provides a collection of visualization helpers that operate directly on PyTorch tensors — no conversion to PIL or NumPy required. You can annotate images with detection boxes, segmentation overlays, pose keypoints, and optical flow, then save them individually or arranged into a grid. All drawing functions accept `uint8` **or** floating-point tensors and return a tensor of the same dtype.
@@ -120,7 +120,7 @@ torchvision.utils.draw_bounding_boxes(
     boxes: Tensor,
     labels: list[str] | None = None,
     colors: list[str | tuple] | str | tuple | None = None,
-    fill: bool = False,
+    fill: bool | None = False,
     width: int = 1,
     font: str | None = None,
     font_size: int | None = None,

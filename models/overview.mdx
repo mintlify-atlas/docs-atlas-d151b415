@@ -167,6 +167,7 @@ Each `WeightsEnum` entry bundles the checkpoint URL, preprocessing transforms, a
 Transfer learning from ImageNet weights is one of the most common workflows in computer vision. The pattern below freezes the backbone and replaces only the classification head:
 
 ```python
+import torch
 import torch.nn as nn
 from torchvision.models import resnet50, ResNet50_Weights
 

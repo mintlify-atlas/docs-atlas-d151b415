@@ -1,7 +1,7 @@
 ---
-title: "TorchVision Ops: Vision Primitives and Layers"
+title: "torchvision.ops: Vision-Specific Primitives and Layers"
 sidebarTitle: "Ops"
-description: "Complete reference for torchvision.ops — box utilities, RoI pooling, focal loss, deformable convolutions, FPN, and regularization primitives for detection models."
+description: "Full reference for torchvision.ops — NMS, box utilities, RoI pooling, focal loss, deformable convolutions, FPN, and regularization layers."
 ---
 
 `torchvision.ops` is a library of vision-specific operations that sit below the model level: box manipulation, region-of-interest pooling, custom losses, deformable layers, and regularization blocks. These primitives are used internally by TorchVision's detection and segmentation models (Faster R-CNN, RetinaNet, Mask R-CNN, etc.) and are fully available for use in custom architectures. Many operations include both a functional form and an `nn.Module` wrapper.
@@ -71,7 +71,7 @@ from torchvision.ops import (
 # Compute area (supports XYXY by default, also accepts XYWH / CXCYWH via fmt=)
 areas = box_area(boxes)  # Tensor[N]
 
-# Convert between formats: "xyxy", "xywh", "cxcywh"
+# Convert between formats: "xyxy", "xywh", "cxcywh", "xywhr", "cxcywhr", "xyxyxyxy"
 xywh_boxes = box_convert(boxes, in_fmt="xyxy", out_fmt="xywh")
 cxcywh_boxes = box_convert(boxes, in_fmt="xyxy", out_fmt="cxcywh")
 
@@ -103,7 +103,7 @@ roi_align = RoIAlign(
     output_size=(7, 7),
     spatial_scale=1.0 / 16,  # feature map stride (e.g., 16 for a stride-16 backbone)
     sampling_ratio=-1,        # -1 = adaptive; >0 = fixed grid per bin
-    aligned=True,             # half-pixel offset (recommended)
+    aligned=True,             # half-pixel offset; default is False
 )
 
 feature_map = torch.rand(1, 256, 56, 56)
@@ -112,7 +112,7 @@ rois = torch.tensor([[0., 10., 10., 100., 100.]])
 pooled = roi_align(feature_map, [rois[:, 1:]])  # Tensor[1, 256, 7, 7]
 ```
 
-`RoIAlign` is differentiable and preferred over `RoIPool` for most use cases. The `aligned=True` option shifts coordinates by half a pixel to better align with the feature grid, matching the Detectron2 convention.
+`RoIAlign` is differentiable and preferred over `RoIPool` for most use cases. The `aligned` parameter defaults to `False`; setting it to `True` shifts coordinates by half a pixel to better align with the feature grid, matching the Detectron2 convention (recommended for new models).
 
 ### Other RoI Poolers
 
@@ -233,6 +233,7 @@ fpn = FeaturePyramidNetwork(
     in_channels_list=[256, 512, 1024, 2048],  # backbone channel counts per level
     out_channels=256,
     extra_blocks=None,  # optionally add P6, P7 via LastLevelMaxPool or LastLevelP6P7
+    norm_layer=None,    # optional normalization layer applied after each lateral conv
 )
 
 # Provide an OrderedDict of feature maps from your backbone
@@ -414,7 +415,7 @@ roi_align = RoIAlign(
     output_size=(7, 7),
     spatial_scale=1.0 / 16,  # feature map stride
     sampling_ratio=-1,
-    aligned=True,
+    aligned=True,             # default is False; set True for Detectron2-style alignment
 )
 
 feature_map = torch.rand(1, 256, 56, 56)
@@ -432,7 +433,7 @@ print(pooled.shape)  # torch.Size([1, 256, 7, 7])
     `nms`, `batched_nms`, `box_iou`, `generalized_box_iou`, `distance_box_iou`, `complete_box_iou`, `box_area`, `box_convert`, `clip_boxes_to_image`, `remove_small_boxes`, `masks_to_boxes`
   </Card>
   <Card title="RoI Pooling" icon="table-cells">
-    `RoIAlign`, `RoIPool`, `PSRoIAlign`, `PSRoIPool`, `MultiScaleRoIAlign`
+    `RoIAlign`, `roi_align`, `RoIPool`, `roi_pool`, `PSRoIAlign`, `ps_roi_align`, `PSRoIPool`, `ps_roi_pool`, `MultiScaleRoIAlign`
   </Card>
   <Card title="Loss Functions" icon="chart-line">
     `sigmoid_focal_loss`, `generalized_box_iou_loss`, `distance_box_iou_loss`, `complete_box_iou_loss`

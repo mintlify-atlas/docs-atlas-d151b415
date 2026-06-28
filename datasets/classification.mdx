@@ -127,9 +127,7 @@ from torchvision.datasets import ImageNet
 ImageNet(
     root: str | Path,              # must contain ILSVRC2012_devkit_t12.tar.gz
     split: str = "train",          # "train" or "val"
-    transform=None,
-    target_transform=None,
-    loader=default_loader,
+    **kwargs,                      # forwarded to ImageFolder: transform, target_transform, loader, etc.
 )
 ```
 

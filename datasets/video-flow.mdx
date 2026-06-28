@@ -418,7 +418,7 @@ from torchvision.datasets import FallingThingsStereo
 
 FallingThingsStereo(
     root: str | Path,
-    variant: str = "single",  # "single" | "mixed" | "fat"
+    variant: str = "single",  # "single" | "mixed" | "both"
     transforms: Callable | None = None,
 )
 ```
@@ -494,13 +494,13 @@ ETH3DStereo(
 
 | Class | Split support | Built-in mask | `download=True` |
 |---|---|---|---|
-| `Kitti2012Stereo` | `train` / `test` | No | ❌ Manual |
-| `Kitti2015Stereo` | `train` / `test` | No | ❌ Manual |
+| `Kitti2012Stereo` | `train` / `test` | ✅ Built-in | ❌ Manual |
+| `Kitti2015Stereo` | `train` / `test` | ✅ Built-in | ❌ Manual |
 | `CarlaStereo` | training only | No | ❌ Manual |
-| `Middlebury2014Stereo` | `train` / `additional` / `test` | No | ✅ |
-| `CREStereo` | training only | No | ❌ Manual |
-| `FallingThingsStereo` | `single` / `mixed` / `fat` variants | No | ❌ Manual |
+| `Middlebury2014Stereo` | `train` / `additional` / `test` | ✅ Built-in | ✅ |
+| `CREStereo` | training only | ✅ Built-in | ❌ Manual |
+| `FallingThingsStereo` | `single` / `mixed` / `both` variants | No | ❌ Manual |
 | `SceneFlowStereo` | training only | No | ❌ Manual |
-| `SintelStereo` | training only | No | ❌ Manual |
+| `SintelStereo` | training only | ✅ Built-in | ❌ Manual |
 | `InStereo2k` | `train` / `test` | No | ❌ Manual |
-| `ETH3DStereo` | `train` / `test` | No | ❌ Manual |
+| `ETH3DStereo` | `train` / `test` | ✅ Built-in | ❌ Manual |

@@ -35,13 +35,14 @@ RAFT follows a multi-stage training curriculum. The weight enum names encode the
 
 ### `Raft_Large_Weights`
 
-| Enum key | Trained on | Benchmarked on | EPE |
-|----------|-----------|----------------|-----|
-| `C_T_V2` | FlyingChairs + FlyingThings3D | Sintel Clean | 1.38 |
-| `C_T_V2` | FlyingChairs + FlyingThings3D | Sintel Final | 2.72 |
-| `C_T_SKHT_V2` (**DEFAULT**) | +Sintel fine-tune | Sintel-Test Clean | 1.82 |
-| `C_T_SKHT_V2` (**DEFAULT**) | +Sintel fine-tune | Sintel-Test Final | 3.07 |
-| `C_T_SKHT_K_V2` | +Sintel +KITTI | KITTI-Test fl-all | 5.19% |
+| Enum key | Trained on | Sintel-Train Clean EPE | Sintel-Train Final EPE | Notes |
+|----------|-----------|------------------------|------------------------|-------|
+| `C_T_V1` | FlyingChairs + FlyingThings3D (ported) | 1.44 | 2.79 | Ported from original paper |
+| `C_T_V2` | FlyingChairs + FlyingThings3D | 1.38 | 2.72 | Trained from scratch |
+| `C_T_SKHT_V1` | +Sintel fine-tune (ported) | — (Sintel-**Test** Clean: 1.94) | — (Sintel-**Test** Final: 3.18) | Ported |
+| `C_T_SKHT_V2` (**DEFAULT**) | +Sintel fine-tune | — (Sintel-**Test** Clean: 1.82) | — (Sintel-**Test** Final: 3.07) | Trained from scratch |
+| `C_T_SKHT_K_V1` | +Sintel +KITTI (ported) | — | — | KITTI-Test fl-all: 5.10% |
+| `C_T_SKHT_K_V2` | +Sintel +KITTI | — | — | KITTI-Test fl-all: 5.19% |
 
 <Tip>
   **EPE** (End-Point Error) measures the average Euclidean distance in pixels between predicted and ground-truth flow vectors. Lower is better.
@@ -49,9 +50,10 @@ RAFT follows a multi-stage training curriculum. The weight enum names encode the
 
 ### `Raft_Small_Weights`
 
-| Enum key | Trained on | Notes |
-|----------|-----------|-------|
-| `C_T_V2` (**DEFAULT**) | FlyingChairs + FlyingThings3D | ~5× fewer params than Large |
+| Enum key | Trained on | Sintel-Train Clean EPE | Sintel-Train Final EPE | Notes |
+|----------|-----------|------------------------|------------------------|-------|
+| `C_T_V1` | FlyingChairs + FlyingThings3D (ported) | 2.12 | 3.28 | Ported from original paper |
+| `C_T_V2` (**DEFAULT**) | FlyingChairs + FlyingThings3D | 1.99 | 3.28 | ~5× fewer params than Large |
 
 ---
 

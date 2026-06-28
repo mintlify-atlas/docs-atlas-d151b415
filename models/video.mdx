@@ -14,12 +14,12 @@ TorchVision ships a full suite of pretrained video classification models that op
 
 Video models expect clips as float tensors with shape `Tensor[B, C, T, H, W]`:
 
-| Dimension | Meaning               | Typical value         |
-|-----------|-----------------------|-----------------------|
-| `B`       | Batch size            | ≥ 1                   |
-| `C`       | Channels (RGB)        | 3                     |
-| `T`       | Time / frames         | 16                    |
-| `H`, `W`  | Spatial dimensions    | 112 × 112             |
+| Dimension | Meaning               | Notes                                      |
+|-----------|-----------------------|--------------------------------------------|
+| `B`       | Batch size            | ≥ 1                                        |
+| `C`       | Channels (RGB)        | 3                                          |
+| `T`       | Time / frames         | 16 for R3D/MC3/R(2+1)D/MViT; 32 for Swin3D |
+| `H`, `W`  | Spatial dimensions    | 112 × 112 for R3D family; 224 × 224 for Swin3D, MViT, S3D |
 
 Each model's `weights.transforms()` returns a `VideoClassification` callable that handles resizing and normalization — always apply it before running inference.
 
